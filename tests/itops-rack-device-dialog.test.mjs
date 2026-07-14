@@ -36,6 +36,21 @@ test("Rack Device editor follows the compact redesign layout", async () => {
   assert.doesNotMatch(styles, /rack-item-dialog-column[\s\S]{0,180}border-right/);
 });
 
+test("fractional Rack Device position moves the properties preview", async () => {
+  const dialog = await read("src/modules/itops/RackItemDialog.tsx");
+
+  assert.match(dialog, /const previewSlotCount = rackItemSlotCount/);
+  assert.match(dialog, /marginLeft: `\$\{\(slot \* 100\) \/ previewSlotCount\}%`/);
+});
+
+test("Rack Device dialog hides manual network-port and SNMP metadata", async () => {
+  const dialog = await read("src/modules/itops/RackItemDialog.tsx");
+
+  assert.doesNotMatch(dialog, /portSpeedsLabel|addNetworkPort|rack-port-|snmpLabel|snmpOidLabel/);
+  assert.match(dialog, /networkPorts: initialMetadata\.networkPorts/);
+  assert.match(dialog, /snmp: initialMetadata\.snmp/);
+});
+
 test("Rack Device editor centers the current device type in its header", async () => {
   const dialog = await read("src/modules/itops/RackItemDialog.tsx");
   const styles = await read("src/modules/itops/itops.css");

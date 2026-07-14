@@ -23,8 +23,6 @@ import type {
   RackItemMetadata,
   RackItemStatus,
   RackItemWidthFraction,
-  RackNetworkPort,
-  RackPortSpeed,
   RackServerFormFactor,
   RackServerPanelStyle,
   RackShell,
@@ -41,7 +39,6 @@ import { RackHostBindingDialog } from "./RackHostBindingDialog";
 import { useItOpsStore } from "./state";
 
 const SHELL_OPTIONS: RackShell[] = ["black", "white", "grey"];
-const PORT_SPEEDS: RackPortSpeed[] = ["gigabit", "10g", "25g", "40g", "100g", "custom"];
 
 export const RACK_ITEM_KINDS: RackItemKind[] = [
   "server",
@@ -73,10 +70,6 @@ function splitLines(value: string): string[] | null {
 
 function joinValues(value: string[] | null | undefined): string {
   return (value ?? []).join("\n");
-}
-
-function newNetworkPort(index: number): RackNetworkPort {
-  return { name: `${index + 1}`, speed: "gigabit", state: "unknown" };
 }
 
 function clampStartUForHeight(startU: number, heightU: number, rackHeightU: number) {
@@ -125,7 +118,6 @@ export function RackItemDialog({
   const placeRackItem = useItOpsStore((state) => state.placeRackItem);
   const updateRackItem = useItOpsStore((state) => state.updateRackItem);
   const removeRackItem = useItOpsStore((state) => state.removeRackItem);
-  const refreshRackItemSnmp = useItOpsStore((state) => state.refreshRackItemSnmp);
 
   const [kind, setKind] = useState<RackItemKind>(initialKind);
   const [connectionId, setConnectionId] = useState<string>(
@@ -153,11 +145,6 @@ export function RackItemDialog({
   // in the Rack View callout.
   const [hostId, setHostId] = useState(item?.metadata?.hostId ?? "");
   const [editingHostBinding, setEditingHostBinding] = useState(false);
-  const [networkPortRows, setNetworkPortRows] = useState<RackNetworkPort[]>(
-    initialMetadata.networkPorts ?? [],
-  );
-  const [snmpTarget, setSnmpTarget] = useState(initialMetadata.snmp?.target ?? "");
-  const [snmpOid, setSnmpOid] = useState(initialMetadata.snmp?.oid ?? "");
   const [vendor, setVendor] = useState(item?.metadata?.vendor ?? "");
   const [formFactor, setFormFactor] = useState<RackServerFormFactor>(
     initialMetadata.formFactor ?? "rack",
@@ -180,6 +167,9 @@ export function RackItemDialog({
       ? startU
       : clampStartUForHeight(startU, heightU, rack.heightU);
   const previewLabel = label.trim() || t(`itops.racks.kind.${kind}`);
+  const previewSlotCount = rackItemSlotCount(
+    widthFraction === "full" ? null : widthFraction,
+  );
   const parsedDraw = Number.parseInt(powerDraw, 10);
   const parsedPowerDraw = Number.isFinite(parsedDraw) && parsedDraw > 0 ? parsedDraw : null;
   // A 乖乖 package is decor: no status/shell/accent/power semantics.
@@ -193,17 +183,8 @@ export function RackItemDialog({
     tags: splitLines(tags),
     connectionIds: initialMetadata.connectionIds,
     hostId: hostId || null,
-    networkPorts: networkPortRows
-      .map((port) => ({
-        ...port,
-        name: port.name.trim(),
-        oid: port.oid?.trim() || null,
-        note: port.note?.trim() || null,
-      }))
-      .filter((port) => port.name),
-    snmp: snmpTarget.trim()
-      ? { target: snmpTarget.trim(), oid: snmpOid.trim() || null }
-      : null,
+    networkPorts: initialMetadata.networkPorts,
+    snmp: initialMetadata.snmp,
     vendor: vendor.trim() || null,
     formFactor: kind === "server" ? formFactor : null,
     widthFraction:
@@ -232,14 +213,6 @@ export function RackItemDialog({
   // Picker flow: the dialog only configures the device; the rack position
   // comes from the armed placement click afterwards.
   const placementMode = !isEdit && !!onConfigured;
-
-  function updateNetworkPort(index: number, patch: Partial<RackNetworkPort>) {
-    setNetworkPortRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  }
-
-  function addNetworkPort() {
-    setNetworkPortRows((rows) => [...rows, newNetworkPort(rows.length)]);
-  }
 
   function selectKind(next: RackItemKind) {
     setKind(next);
@@ -305,20 +278,6 @@ export function RackItemDialog({
     }
   }
 
-  async function handleRefreshSnmp() {
-    if (!item) return;
-    setBusy(true);
-    try {
-      await refreshRackItemSnmp(siteId, item.id);
-      showStatusBarNotice(t("itops.racks.snmpRefreshComplete"), { tone: "success" });
-      onClose();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
-      setBusy(false);
-    }
-  }
-
   async function handleRemove() {
     if (!item) return;
     setBusy(true);
@@ -376,7 +335,10 @@ export function RackItemDialog({
                       style={{
                         ["--rack-item-preview-height" as string]: `${Math.min(5, Math.max(1, heightU)) * 22}px`,
                         ...(rackItemKindSupportsFractionalWidth(kind) && widthFraction !== "full"
-                          ? { width: widthFraction === "half" ? "50%" : "25%" }
+                          ? {
+                              width: `${100 / previewSlotCount}%`,
+                              marginLeft: `${(slot * 100) / previewSlotCount}%`,
+                            }
                           : {}),
                       }}
                     >
@@ -681,38 +643,6 @@ export function RackItemDialog({
                 </Field>
               </div>
             ) : null}
-
-        {kind === "switch" || kind === "router" ? (
-          <>
-            <Field label={t("itops.racks.portSpeedsLabel")} hint={t("itops.racks.portSpeedsHint")}>
-              <div className="rack-port-list">
-                {networkPortRows.map((port, index) => (
-                  <div className="rack-port-row" key={`${port.name}-${index}`}>
-                    <TextInput value={port.name} onChange={(event) => updateNetworkPort(index, { name: event.currentTarget.value })} />
-                    <Select value={port.speed} onChange={(event) => updateNetworkPort(index, { speed: event.currentTarget.value as RackPortSpeed })} options={PORT_SPEEDS.map((speed) => ({ value: speed, label: speed.toUpperCase() }))} />
-                    <Select value={port.state ?? "unknown"} onChange={(event) => updateNetworkPort(index, { state: event.currentTarget.value as RackNetworkPort["state"] })} options={["unknown", "up", "down"].map((state) => ({ value: state, label: t(`itops.racks.portState.${state}`) }))} />
-                  </div>
-                ))}
-                <Btn kind="ghost" onClick={addNetworkPort}>
-                  {t("itops.racks.addNetworkPort")}
-                </Btn>
-              </div>
-            </Field>
-            <div className="rack-form-grid two">
-              <Field label={t("itops.racks.snmpLabel")} hint={t("itops.racks.snmpHint")}>
-                <TextInput value={snmpTarget} onChange={(event) => setSnmpTarget(event.currentTarget.value)} />
-              </Field>
-              <Field label={t("itops.racks.snmpOidLabel")}>
-                <TextInput value={snmpOid} onChange={(event) => setSnmpOid(event.currentTarget.value)} />
-              </Field>
-            </div>
-            {isEdit && snmpTarget.trim() ? (
-              <Btn kind="ghost" onClick={() => void handleRefreshSnmp()} disabled={busy}>
-                {t("itops.racks.refreshSnmp")}
-              </Btn>
-            ) : null}
-          </>
-        ) : null}
 
             <button
               type="button"

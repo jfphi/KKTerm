@@ -6275,13 +6275,23 @@
   border-top: 2px solid var(--skin-rail);
   border-bottom: 2px solid var(--skin-rail);
 }
+.itops-page .rm-iso-skin-items {
+  position: absolute;
+  display: block;
+}
+.itops-page .rm-iso-skin.axis-y .rm-iso-skin-items {
+  inset: 0 2px;
+}
+.itops-page .rm-iso-skin.axis-x .rm-iso-skin-items {
+  inset: 2px 0;
+}
 .itops-page .rm-iso-skin.axis-y .rm-iso-skin-item {
-  left: 2px;
-  right: 2px;
+  left: 0;
+  right: 0;
 }
 .itops-page .rm-iso-skin.axis-x .rm-iso-skin-item {
-  top: 2px;
-  bottom: 2px;
+  top: 0;
+  bottom: 0;
 }
 .itops-page .rm-iso-skin-item {
   position: absolute;
@@ -6991,21 +7001,6 @@
   justify-self: center;
 }
 
-.itops-page .rack-port-list {
-  display: grid;
-  gap: 8px;
-}
-
-.itops-page .rack-port-row {
-  display: grid;
-  gap: 8px;
-  align-items: center;
-}
-
-.rack-item-dialog .rack-port-row {
-  grid-template-columns: 1fr;
-}
-
 .itops-page .connection-binding-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7118,8 +7113,7 @@
   .rack-item-dialog-grid { grid-template-columns: 1fr; }
   .itops-page .rack-form-grid.two,
   .itops-page .rack-kuaiguai-fields,
-  .itops-page .connection-binding-list,
-  .itops-page .rack-port-row {
+  .itops-page .connection-binding-list {
     grid-template-columns: 1fr;
   }
 }

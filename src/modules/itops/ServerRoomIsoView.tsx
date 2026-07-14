@@ -977,39 +977,41 @@ function IsoRackSkin({ rack, axis }: { rack: Rack; axis: "y" | "x" }) {
       className={`rm-iso-skin axis-${axis}`}
       data-shell={rack.shell && rack.shell !== "black" ? rack.shell : undefined}
     >
-      {rack.items.filter((item) => item.kind !== "kuaiguai").map((item) => {
-        const topU = item.startU + item.heightU - 1;
-        const offset = ((capacity - topU) / capacity) * 100;
-        const size = (Math.max(1, item.heightU) / capacity) * 100;
-        // Fractional-width faces inset across the strip's cross axis so two
-        // devices sharing a U render side by side.
-        const { xStart, xQuarters } = rackItemXSpan(item.metadata);
-        const cross =
-          xQuarters < 4
-            ? { start: `${xStart * 25}%`, size: `${xQuarters * 25}%` }
-            : null;
-        return (
-          <i
-            key={item.id}
-            className="rm-iso-skin-item"
-            data-kind={item.kind}
-            data-status={itemStatus(item)}
-            style={
-              axis === "y"
-                ? {
-                    top: `${offset}%`,
-                    height: `${size}%`,
-                    ...(cross ? { left: cross.start, width: cross.size } : {}),
-                  }
-                : {
-                    left: `${offset}%`,
-                    width: `${size}%`,
-                    ...(cross ? { top: cross.start, height: cross.size } : {}),
-                  }
-            }
-          />
-        );
-      })}
+      <span className="rm-iso-skin-items">
+        {rack.items.filter((item) => item.kind !== "kuaiguai").map((item) => {
+          const topU = item.startU + item.heightU - 1;
+          const offset = ((capacity - topU) / capacity) * 100;
+          const size = (Math.max(1, item.heightU) / capacity) * 100;
+          // Fractional-width faces inset across the strip's cross axis so two
+          // devices sharing a U render side by side.
+          const { xStart, xQuarters } = rackItemXSpan(item.metadata);
+          const cross =
+            xQuarters < 4
+              ? { start: `${xStart * 25}%`, size: `${xQuarters * 25}%` }
+              : null;
+          return (
+            <i
+              key={item.id}
+              className="rm-iso-skin-item"
+              data-kind={item.kind}
+              data-status={itemStatus(item)}
+              style={
+                axis === "y"
+                  ? {
+                      top: `${offset}%`,
+                      height: `${size}%`,
+                      ...(cross ? { left: cross.start, width: cross.size } : {}),
+                    }
+                  : {
+                      left: `${offset}%`,
+                      width: `${size}%`,
+                      ...(cross ? { top: cross.start, height: cross.size } : {}),
+                    }
+              }
+            />
+          );
+        })}
+      </span>
     </span>
   );
 }
