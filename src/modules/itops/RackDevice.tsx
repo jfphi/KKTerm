@@ -426,7 +426,7 @@ export function RackDevice({
 
           {/* PDU */}
           {isPdu ? (
-            <div className="rkd-pdu">
+            <div className="rkd-pdu" data-height-u={heightU}>
               <div className="rkd-outlets">
                 {outlets.map((o) => (
                   <span className="rkd-outlet" key={o}>

@@ -3944,6 +3944,27 @@
   color: var(--amber);
   font-weight: 600;
 }
+.itops-page .rkd-pdu[data-height-u="1"] {
+  gap: 2px;
+}
+.itops-page .rkd-pdu[data-height-u="1"] .rkd-outlet {
+  width: 9px;
+  height: 9px;
+}
+.itops-page .rkd-pdu[data-height-u="1"] .rkd-outlet-pin {
+  width: 1px;
+  height: 3px;
+}
+.itops-page .rkd-pdu[data-height-u="1"] .rkd-load {
+  gap: 4px;
+}
+.itops-page .rkd-pdu[data-height-u="1"] .rkd-load-track {
+  height: 3px;
+}
+.itops-page .rkd-pdu[data-height-u="1"] .rkd-load-pct {
+  font-size: 7.5px;
+  line-height: 1;
+}
 
 /* UPS. */
 .itops-page .rkd-ups {
