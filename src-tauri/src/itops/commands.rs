@@ -608,9 +608,10 @@ pub fn itops_move_rack_item(
     rack_id: String,
     start_u: u32,
     height_u: u32,
+    slot: Option<u32>,
 ) -> Result<RackItem, String> {
     storage(&app).with_connection_infallible(|conn| {
-        topo::move_rack_item(conn, &id, &rack_id, start_u, height_u)
+        topo::move_rack_item(conn, &id, &rack_id, start_u, height_u, slot)
             .map_err(|error| error.to_string())
     })
 }

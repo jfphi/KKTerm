@@ -274,7 +274,7 @@ interface ItOpsState {
   updateRackItem: (siteId: string, input: UpdateItemInput) => Promise<void>;
   moveRackItem: (
     siteId: string,
-    input: { id: string; rackId: string; startU: number; heightU: number },
+    input: { id: string; rackId: string; startU: number; heightU: number; slot?: number },
   ) => Promise<void>;
   removeRackItem: (siteId: string, id: string) => Promise<void>;
   refreshRackItemSnmp: (siteId: string, id: string) => Promise<void>;

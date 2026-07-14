@@ -158,7 +158,7 @@ test("Rack device picker arms a configure-then-place flow with a cursor-snapped 
   // SitesTab arms the configured draft and places it on the elevation click.
   assert.match(sites, /useState<RackItemDraft \| null>\(null\)/);
   assert.match(sites, /onConfigureDevice/);
-  assert.match(sites, /onPlaceDevice\(rack, placeDevice, startU\)/);
+  assert.match(sites, /onPlaceDevice\(rack, placeDevice, startU, slot\)/);
   assert.match(sites, /placeConfiguredDevice/);
   assert.match(sites, /armedKind=\{placeDevice\?\.kind \?\? null\}/);
   // The elevation snaps the ghost to the hovered U, blocks overlaps, and

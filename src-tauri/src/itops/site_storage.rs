@@ -25,23 +25,51 @@ const ISO_FLOOR_COLORS: [&str; 5] = ["default", "concrete", "graphite", "green",
 
 // ── Pure placement validation ───────────────────────────────────────────────
 
-/// A `[start_u, start_u + height_u)` half-open U span (1-based start).
+/// A `[start_u, start_u + height_u)` half-open U span (1-based start) plus the
+/// horizontal quarter-unit strip `[x_start, x_start + x_quarters)` the face
+/// occupies, so fractional-width devices (e.g. two half-width modems) can
+/// share one U row side by side. A full-width device spans `[0, 4)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
     pub start_u: u32,
     pub height_u: u32,
+    pub x_start: u32,
+    pub x_quarters: u32,
 }
 
 impl Span {
+    /// A full-rack-width span (the default for devices without a fractional
+    /// `widthFraction` in their metadata).
+    pub fn full(start_u: u32, height_u: u32) -> Self {
+        Span { start_u, height_u, x_start: 0, x_quarters: 4 }
+    }
+
     /// Exclusive top edge: the first U *above* this item.
     fn end_exclusive(&self) -> u32 {
         self.start_u + self.height_u
     }
 }
 
-/// Two spans overlap when each starts below the other's exclusive top.
+/// Horizontal quarter-unit strip a device face occupies, from its metadata:
+/// full width is `(0, 4)`; "half"/"quarter" widths occupy 2/1 quarters
+/// starting at `slot * width`.
+fn metadata_x_span(metadata: &RackItemMetadata) -> (u32, u32) {
+    let x_quarters = match metadata.width_fraction.as_deref() {
+        Some("half") => 2,
+        Some("quarter") => 1,
+        _ => return (0, 4),
+    };
+    let slot = metadata.slot.unwrap_or(0).min(4 / x_quarters - 1);
+    (slot * x_quarters, x_quarters)
+}
+
+/// Two spans overlap when they intersect on both the U axis and the
+/// horizontal quarter-unit axis.
 pub fn spans_overlap(a: Span, b: Span) -> bool {
-    a.start_u < b.end_exclusive() && b.start_u < a.end_exclusive()
+    a.start_u < b.end_exclusive()
+        && b.start_u < a.end_exclusive()
+        && a.x_start < b.x_start + b.x_quarters
+        && b.x_start < a.x_start + a.x_quarters
 }
 
 /// Validate that `candidate` is a legal placement in a rack of `rack_height_u`:
@@ -409,11 +437,14 @@ fn existing_spans(conn: &SqliteConnection, rack_id: &str) -> Result<Vec<(String,
     Ok(list_items_for_rack(conn, rack_id)?
         .into_iter()
         .map(|item| {
+            let (x_start, x_quarters) = metadata_x_span(&item.metadata);
             (
                 item.id,
                 Span {
                     start_u: item.start_u,
                     height_u: item.height_u,
+                    x_start,
+                    x_quarters,
                 },
             )
         })
@@ -923,14 +954,16 @@ pub fn place_rack_item(
     metadata: RackItemMetadata,
 ) -> Result<RackItem> {
     let connection_id = normalize_item_connection(kind, connection_id)?;
+    let metadata = normalize_metadata(metadata);
     let rack_height = fetch_rack_height(conn, rack_id)?;
     let existing = existing_spans(conn, rack_id)?;
+    let (x_start, x_quarters) = metadata_x_span(&metadata);
     validate_item_placement(
         kind,
         rack_height,
         &existing,
         None,
-        Span { start_u, height_u },
+        Span { start_u, height_u, x_start, x_quarters },
     )?;
     let metadata_json = metadata_to_json(&metadata)?;
     conn.execute(
@@ -979,6 +1012,23 @@ pub fn update_rack_item(
         ));
     }
     let connection_id = normalize_item_connection(kind, connection_id)?;
+    let metadata = normalize_metadata(metadata);
+    // A width/slot change alters the face's horizontal footprint: re-validate
+    // the current position with the new metadata before storing it.
+    let (x_start, x_quarters) = metadata_x_span(&metadata);
+    let existing = existing_spans(conn, &current.rack_id)?;
+    validate_item_placement(
+        kind,
+        rack_height,
+        &existing,
+        Some(id),
+        Span {
+            start_u: current.start_u,
+            height_u: current.height_u,
+            x_start,
+            x_quarters,
+        },
+    )?;
     let metadata_json = metadata_to_json(&metadata)?;
     let affected = conn.execute(
         "UPDATE itops_site_rack_items
@@ -993,29 +1043,39 @@ pub fn update_rack_item(
 }
 
 /// Move and/or resize a Rack Device — possibly into a different Rack. Re-validates
-/// the placement against the target rack (excluding this item).
+/// the placement against the target rack (excluding this item). `slot` moves a
+/// fractional-width device to another horizontal slot in the same call; None
+/// keeps the stored slot (and is ignored for full-width devices).
 pub fn move_rack_item(
     conn: &SqliteConnection,
     id: &str,
     rack_id: &str,
     start_u: u32,
     height_u: u32,
+    slot: Option<u32>,
 ) -> Result<RackItem> {
     let current = fetch_item(conn, id)?;
+    let mut metadata = current.metadata.clone();
+    if slot.is_some() && metadata.width_fraction.is_some() {
+        metadata.slot = slot;
+        metadata = normalize_metadata(metadata);
+    }
     let rack_height = fetch_rack_height(conn, rack_id)?;
     let existing = existing_spans(conn, rack_id)?;
+    let (x_start, x_quarters) = metadata_x_span(&metadata);
     validate_item_placement(
         current.kind,
         rack_height,
         &existing,
         Some(id),
-        Span { start_u, height_u },
+        Span { start_u, height_u, x_start, x_quarters },
     )?;
+    let metadata_json = metadata_to_json(&metadata)?;
     let affected = conn.execute(
         "UPDATE itops_site_rack_items
-         SET rack_id = ?, start_u = ?, height_u = ?, updated_at = CURRENT_TIMESTAMP
+         SET rack_id = ?, start_u = ?, height_u = ?, metadata_json = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?",
-        params![rack_id, start_u, height_u, id],
+        params![rack_id, start_u, height_u, metadata_json, id],
     )?;
     if affected == 0 {
         return Err(ItopsStorageError::NotFound);
@@ -1129,7 +1189,11 @@ mod tests {
     }
 
     fn span(start_u: u32, height_u: u32) -> Span {
-        Span { start_u, height_u }
+        Span::full(start_u, height_u)
+    }
+
+    fn fractional(start_u: u32, height_u: u32, x_start: u32, x_quarters: u32) -> Span {
+        Span { start_u, height_u, x_start, x_quarters }
     }
 
     #[test]
@@ -1139,6 +1203,22 @@ mod tests {
         // A 2U device at U10 occupies U10-U11, colliding with a 1U at U11.
         assert!(spans_overlap(span(10, 2), span(11, 1)));
         assert!(spans_overlap(span(10, 2), span(10, 1)));
+    }
+
+    #[test]
+    fn fractional_widths_share_a_u_row_without_overlapping() {
+        // Two half-width devices side by side in the same U do not collide.
+        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 2, 2)));
+        // Same slot collides; a full-width device collides with either half.
+        assert!(spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 0, 2)));
+        assert!(spans_overlap(span(10, 1), fractional(10, 1, 2, 2)));
+        // Four quarter-width devices tile one U; adjacent quarters don't touch.
+        assert!(!spans_overlap(fractional(10, 1, 0, 1), fractional(10, 1, 1, 1)));
+        // A half at the left overlaps a quarter in x-slot 1 but not slot 2.
+        assert!(spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 1, 1)));
+        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 2, 1)));
+        // Different U rows never collide regardless of x overlap.
+        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(11, 1, 0, 2)));
     }
 
     #[test]
@@ -1472,7 +1552,7 @@ mod tests {
         assert_eq!(passive.connection_id, None);
 
         // Move the web host down; it must clear the PDU at U1.
-        let moved = move_rack_item(&conn, "i1", "r1", 10, 2).unwrap();
+        let moved = move_rack_item(&conn, "i1", "r1", 10, 2, None).unwrap();
         assert_eq!(moved.start_u, 10);
 
         let racks = list_racks(&conn, "f1").unwrap();
@@ -1480,6 +1560,58 @@ mod tests {
 
         remove_rack_item(&conn, "i1").unwrap();
         assert_eq!(list_racks(&conn, "f1").unwrap()[0].items.len(), 2);
+    }
+
+    #[test]
+    fn fractional_width_devices_place_move_and_update_side_by_side() {
+        let conn = open_test_db();
+        create_rack(&conn, "r1", "f1", "A12", "Room B", "", None, 42, 1000, None).unwrap();
+        let half = |slot: u32| RackItemMetadata {
+            width_fraction: Some("half".to_string()),
+            slot: Some(slot),
+            ..RackItemMetadata::default()
+        };
+
+        // Two half-width modems share U5: left slot then right slot.
+        place_rack_item(&conn, "m1", "r1", None, RackItemKind::GenericDevice, "modem-a", 5, 1, half(0)).unwrap();
+        place_rack_item(&conn, "m2", "r1", None, RackItemKind::GenericDevice, "modem-b", 5, 1, half(1)).unwrap();
+
+        // A third device cannot take an occupied slot, nor can a full-width
+        // device take the row.
+        assert!(matches!(
+            place_rack_item(&conn, "m3", "r1", None, RackItemKind::GenericDevice, "modem-c", 5, 1, half(1)),
+            Err(ItopsStorageError::Validation(_))
+        ));
+        assert!(matches!(
+            place_rack_item(&conn, "s1", "r1", None, RackItemKind::Switch, "sw", 5, 1, RackItemMetadata::default()),
+            Err(ItopsStorageError::Validation(_))
+        ));
+
+        // A quarter-width device fits beside a half in another row.
+        let quarter = RackItemMetadata {
+            width_fraction: Some("quarter".to_string()),
+            slot: Some(3),
+            ..RackItemMetadata::default()
+        };
+        place_rack_item(&conn, "q1", "r1", None, RackItemKind::Router, "r", 6, 1, quarter).unwrap();
+
+        // Moving into the other half's slot is rejected; a free row works and
+        // the slot moves with the device.
+        assert!(matches!(
+            move_rack_item(&conn, "m1", "r1", 5, 1, Some(1)),
+            Err(ItopsStorageError::Validation(_))
+        ));
+        let moved = move_rack_item(&conn, "m1", "r1", 6, 1, Some(0)).unwrap();
+        assert_eq!(moved.start_u, 6);
+        assert_eq!(moved.metadata.slot, Some(0));
+
+        // Updating a half to full width where the row is shared is rejected.
+        assert!(matches!(
+            update_rack_item(&conn, "q1", RackItemKind::Router, None, "r", RackItemMetadata::default()),
+            Err(ItopsStorageError::Validation(_))
+        ));
+        // Widening where the row is otherwise free is allowed.
+        update_rack_item(&conn, "m2", RackItemKind::GenericDevice, None, "modem-b", RackItemMetadata::default()).unwrap();
     }
 
     #[test]
