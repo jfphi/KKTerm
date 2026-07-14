@@ -110,7 +110,6 @@ export function RackDevice({
   expiry,
   rotation,
   yaw,
-  kuaiguaiSize,
   kuaiguaiStyle,
   notes,
   formFactor,
@@ -157,7 +156,7 @@ export function RackDevice({
         <KuaiKuaiBag
           style={kuaiguaiStyle ?? "full"}
           expiry={expiry}
-          notes={(kuaiguaiSize ?? "large") === "large" ? notes : null}
+          notes={notes}
         />
       </div>
     );

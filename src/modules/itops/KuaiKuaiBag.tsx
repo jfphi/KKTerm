@@ -45,6 +45,10 @@ export function kuaiKuaiNoteLines(notes?: string | null): string[] {
   if (!text) return [];
   const lines: string[] = [];
   for (const para of text.split(/\r?\n/)) {
+    if (!para.trim()) {
+      lines.push("");
+      continue;
+    }
     let line = "";
     let width = 0;
     const flush = () => {

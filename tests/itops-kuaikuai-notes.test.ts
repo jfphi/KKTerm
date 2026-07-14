@@ -3,6 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KuaiKuaiBag, kuaiKuaiNoteLines } from "../src/modules/itops/KuaiKuaiBag";
+import { RackDevice } from "../src/modules/itops/RackDevice";
 
 test("kuaiKuaiNoteLines is empty for missing or blank notes", () => {
   assert.deepEqual(kuaiKuaiNoteLines(null), []);
@@ -13,6 +14,7 @@ test("kuaiKuaiNoteLines is empty for missing or blank notes", () => {
 test("kuaiKuaiNoteLines keeps short notes and user line breaks", () => {
   assert.deepEqual(kuaiKuaiNoteLines("no crash"), ["no crash"]);
   assert.deepEqual(kuaiKuaiNoteLines("swapped PSU\r\n2026-07-01"), ["swapped PSU", "2026-07-01"]);
+  assert.deepEqual(kuaiKuaiNoteLines("first line\n\nthird line"), ["first line", "", "third line"]);
 });
 
 test("kuaiKuaiNoteLines wraps long latin text at word boundaries", () => {
@@ -41,4 +43,18 @@ test("KuaiKuaiBag scribbles notes onto the white note panel", () => {
   assert.match(withNotes, /guard the uptime/);
   const without = renderToStaticMarkup(createElement(KuaiKuaiBag, {}));
   assert.doesNotMatch(without, /kk-bag-notes/);
+});
+
+test("RackDevice shows notes on the current large artwork despite legacy size metadata", () => {
+  const markup = renderToStaticMarkup(createElement(RackDevice, {
+    kind: "kuaiguai",
+    label: "Kuai Kuai",
+    status: "online",
+    kuaiguaiSize: "regular",
+    notes: "legacy package note",
+    heightU: 4,
+    seed: "legacy-package",
+  }));
+  assert.match(markup, /data-kuaiguai-size="large"/);
+  assert.match(markup, /legacy package note/);
 });
