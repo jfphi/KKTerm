@@ -619,6 +619,7 @@ export interface TerminalPane {
   buffer: string;
   connection?: Connection;
   fontSize?: number;
+  textEncoding?: string;
   terminalBackground?: DashboardBackground | null;
   tmuxSessionId?: string;
   tmuxUnavailable?: boolean;
@@ -720,6 +721,7 @@ export interface StoredLayoutPane {
   title?: string;
   cwd?: string;
   fontSize?: number;
+  textEncoding?: string;
   terminalBackground?: DashboardBackground | null;
   tmuxSessionId?: string;
   url?: string;
@@ -1272,6 +1274,7 @@ export interface WorkspaceChildConnection {
   tmuxSessionId?: string;
   cwd?: string;
   fontSize?: number;
+  textEncoding?: string;
   terminalOpacity?: number | null;
   terminalBackground?: DashboardBackground | null;
   iconColor?: string | null;

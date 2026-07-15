@@ -2775,6 +2775,7 @@
     "noRecordings": "Không có bản ghi nào cho kết nối này.",
     "recordingMetadata": "{{metadata}}",
     "font": "Font",
+    "textEncoding": "Mã hóa văn bản",
     "increaseSize": "Increase size",
     "decreaseSize": "Decrease size",
     "resetSize": "Reset size",

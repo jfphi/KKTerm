@@ -2775,6 +2775,7 @@
     "noRecordings": "Tidak ada rekaman untuk Connection ini.",
     "recordingMetadata": "{{metadata}}",
     "font": "Font",
+    "textEncoding": "Pengodean teks",
     "increaseSize": "Perbesar ukuran",
     "decreaseSize": "Perkecil ukuran",
     "resetSize": "Reset ukuran",

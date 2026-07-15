@@ -125,9 +125,10 @@ fn validate_item_placement(
             "a rack-top Kuai Kuai package must be at least 1U tall".to_string(),
         ));
     }
-    if existing.iter().any(|(id, span)| {
-        ignore_id != Some(id.as_str()) && span.start_u == rack_height_u + 1
-    }) {
+    if existing
+        .iter()
+        .any(|(id, span)| ignore_id != Some(id.as_str()) && span.start_u == rack_height_u + 1)
+    {
         return Err(ItopsStorageError::Validation(
             "the rack top already holds a Kuai Kuai package".to_string(),
         ));
@@ -1013,7 +1014,12 @@ pub fn place_rack_item(
         rack_height,
         &existing,
         None,
-        Span { start_u, height_u, x_start, x_quarters },
+        Span {
+            start_u,
+            height_u,
+            x_start,
+            x_quarters,
+        },
     )?;
     let metadata_json = metadata_to_json(&metadata)?;
     conn.execute(
@@ -1129,7 +1135,12 @@ pub fn move_rack_item(
         rack_height,
         &existing,
         Some(id),
-        Span { start_u, height_u, x_start, x_quarters },
+        Span {
+            start_u,
+            height_u,
+            x_start,
+            x_quarters,
+        },
     )?;
     let metadata_json = metadata_to_json(&metadata)?;
     let affected = conn.execute(
@@ -1256,7 +1267,12 @@ mod tests {
     }
 
     fn fractional(start_u: u32, height_u: u32, x_start: u32, x_quarters: u32) -> Span {
-        Span { start_u, height_u, x_start, x_quarters }
+        Span {
+            start_u,
+            height_u,
+            x_start,
+            x_quarters,
+        }
     }
 
     #[test]
@@ -1271,17 +1287,35 @@ mod tests {
     #[test]
     fn fractional_widths_share_a_u_row_without_overlapping() {
         // Two half-width devices side by side in the same U do not collide.
-        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 2, 2)));
+        assert!(!spans_overlap(
+            fractional(10, 1, 0, 2),
+            fractional(10, 1, 2, 2)
+        ));
         // Same slot collides; a full-width device collides with either half.
-        assert!(spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 0, 2)));
+        assert!(spans_overlap(
+            fractional(10, 1, 0, 2),
+            fractional(10, 1, 0, 2)
+        ));
         assert!(spans_overlap(span(10, 1), fractional(10, 1, 2, 2)));
         // Four quarter-width devices tile one U; adjacent quarters don't touch.
-        assert!(!spans_overlap(fractional(10, 1, 0, 1), fractional(10, 1, 1, 1)));
+        assert!(!spans_overlap(
+            fractional(10, 1, 0, 1),
+            fractional(10, 1, 1, 1)
+        ));
         // A half at the left overlaps a quarter in x-slot 1 but not slot 2.
-        assert!(spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 1, 1)));
-        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(10, 1, 2, 1)));
+        assert!(spans_overlap(
+            fractional(10, 1, 0, 2),
+            fractional(10, 1, 1, 1)
+        ));
+        assert!(!spans_overlap(
+            fractional(10, 1, 0, 2),
+            fractional(10, 1, 2, 1)
+        ));
         // Different U rows never collide regardless of x overlap.
-        assert!(!spans_overlap(fractional(10, 1, 0, 2), fractional(11, 1, 0, 2)));
+        assert!(!spans_overlap(
+            fractional(10, 1, 0, 2),
+            fractional(11, 1, 0, 2)
+        ));
     }
 
     #[test]
@@ -1303,12 +1337,8 @@ mod tests {
     #[test]
     fn only_one_kuaiguai_package_may_occupy_the_rack_top() {
         let top = span(43, 4);
-        assert!(
-            validate_item_placement(RackItemKind::Kuaiguai, 42, &[], None, top).is_ok()
-        );
-        assert!(
-            validate_item_placement(RackItemKind::Server, 42, &[], None, top).is_err()
-        );
+        assert!(validate_item_placement(RackItemKind::Kuaiguai, 42, &[], None, top).is_ok());
+        assert!(validate_item_placement(RackItemKind::Server, 42, &[], None, top).is_err());
         assert!(
             validate_item_placement(
                 RackItemKind::Kuaiguai,
@@ -1350,7 +1380,18 @@ mod tests {
         assert_eq!(listed[0].server_room, "Room B");
         assert_eq!(listed[0].rack_group, "G1");
 
-        let updated = update_rack(&conn, "r1", "A13", "Room C", "G2", None, 24, 1200, Some(8000)).unwrap();
+        let updated = update_rack(
+            &conn,
+            "r1",
+            "A13",
+            "Room C",
+            "G2",
+            None,
+            24,
+            1200,
+            Some(8000),
+        )
+        .unwrap();
         assert_eq!(updated.rack_group, "G2");
         assert_eq!(updated.name, "A13");
         assert_eq!(updated.height_u, 24);
@@ -1370,11 +1411,32 @@ mod tests {
     fn rack_power_capacity_normalizes_and_validates() {
         let conn = open_test_db();
         // 0 means "unset" and stores as NULL.
-        let rack =
-            create_rack(&conn, "r1", "f1", "A12", "Room B", "", None, 42, 1000, Some(0)).unwrap();
+        let rack = create_rack(
+            &conn,
+            "r1",
+            "f1",
+            "A12",
+            "Room B",
+            "",
+            None,
+            42,
+            1000,
+            Some(0),
+        )
+        .unwrap();
         assert_eq!(rack.power_capacity_w, None);
-        let updated =
-            update_rack(&conn, "r1", "A12", "Room B", "", None, 42, 1000, Some(12_000)).unwrap();
+        let updated = update_rack(
+            &conn,
+            "r1",
+            "A12",
+            "Room B",
+            "",
+            None,
+            42,
+            1000,
+            Some(12_000),
+        )
+        .unwrap();
         assert_eq!(updated.power_capacity_w, Some(12_000));
         assert_eq!(
             list_racks(&conn, "f1").unwrap()[0].power_capacity_w,
@@ -1382,7 +1444,17 @@ mod tests {
         );
         // Beyond the sanity ceiling is rejected.
         assert!(matches!(
-            update_rack(&conn, "r1", "A12", "Room B", "", None, 42, 1000, Some(1_000_001)),
+            update_rack(
+                &conn,
+                "r1",
+                "A12",
+                "Room B",
+                "",
+                None,
+                42,
+                1000,
+                Some(1_000_001)
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
     }
@@ -1398,15 +1470,27 @@ mod tests {
             &conn,
             RackPlacementKind::Grid,
             &[
-                RackPlacementEntry { id: "a".into(), x: 2.4, y: -1.0 },
-                RackPlacementEntry { id: "gone".into(), x: 1.0, y: 1.0 },
+                RackPlacementEntry {
+                    id: "a".into(),
+                    x: 2.4,
+                    y: -1.0,
+                },
+                RackPlacementEntry {
+                    id: "gone".into(),
+                    x: 1.0,
+                    y: 1.0,
+                },
             ],
         )
         .unwrap();
         set_rack_placements(
             &conn,
             RackPlacementKind::Floor,
-            &[RackPlacementEntry { id: "b".into(), x: 118.5, y: 42.0 }],
+            &[RackPlacementEntry {
+                id: "b".into(),
+                x: 118.5,
+                y: 42.0,
+            }],
         )
         .unwrap();
 
@@ -1423,7 +1507,11 @@ mod tests {
             set_rack_placements(
                 &conn,
                 RackPlacementKind::Floor,
-                &[RackPlacementEntry { id: "a".into(), x: f64::NAN, y: 0.0 }],
+                &[RackPlacementEntry {
+                    id: "a".into(),
+                    x: f64::NAN,
+                    y: 0.0
+                }],
             ),
             Err(ItopsStorageError::Validation(_))
         ));
@@ -1437,9 +1525,15 @@ mod tests {
         set_rack_facings(
             &conn,
             &[
-                RackFacingEntry { id: "a".into(), facing: 3 },
+                RackFacingEntry {
+                    id: "a".into(),
+                    facing: 3,
+                },
                 // Missing ids are skipped like placement writes.
-                RackFacingEntry { id: "gone".into(), facing: 1 },
+                RackFacingEntry {
+                    id: "gone".into(),
+                    facing: 1,
+                },
             ],
         )
         .unwrap();
@@ -1447,7 +1541,13 @@ mod tests {
         assert_eq!(racks[0].facing, Some(3));
 
         assert!(matches!(
-            set_rack_facings(&conn, &[RackFacingEntry { id: "a".into(), facing: 4 }]),
+            set_rack_facings(
+                &conn,
+                &[RackFacingEntry {
+                    id: "a".into(),
+                    facing: 4
+                }]
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
     }
@@ -1653,17 +1753,59 @@ mod tests {
         assert_eq!(server.metadata.slot, None);
 
         // Two half-width modems share U5: left slot then right slot.
-        place_rack_item(&conn, "m1", "r1", None, RackItemKind::GenericDevice, "modem-a", 5, 1, half(0)).unwrap();
-        place_rack_item(&conn, "m2", "r1", None, RackItemKind::GenericDevice, "modem-b", 5, 1, half(1)).unwrap();
+        place_rack_item(
+            &conn,
+            "m1",
+            "r1",
+            None,
+            RackItemKind::GenericDevice,
+            "modem-a",
+            5,
+            1,
+            half(0),
+        )
+        .unwrap();
+        place_rack_item(
+            &conn,
+            "m2",
+            "r1",
+            None,
+            RackItemKind::GenericDevice,
+            "modem-b",
+            5,
+            1,
+            half(1),
+        )
+        .unwrap();
 
         // A third device cannot take an occupied slot, nor can a full-width
         // device take the row.
         assert!(matches!(
-            place_rack_item(&conn, "m3", "r1", None, RackItemKind::GenericDevice, "modem-c", 5, 1, half(1)),
+            place_rack_item(
+                &conn,
+                "m3",
+                "r1",
+                None,
+                RackItemKind::GenericDevice,
+                "modem-c",
+                5,
+                1,
+                half(1)
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
         assert!(matches!(
-            place_rack_item(&conn, "s1", "r1", None, RackItemKind::Switch, "sw", 5, 1, RackItemMetadata::default()),
+            place_rack_item(
+                &conn,
+                "s1",
+                "r1",
+                None,
+                RackItemKind::Switch,
+                "sw",
+                5,
+                1,
+                RackItemMetadata::default()
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
 
@@ -1673,7 +1815,18 @@ mod tests {
             slot: Some(3),
             ..RackItemMetadata::default()
         };
-        place_rack_item(&conn, "q1", "r1", None, RackItemKind::Router, "r", 6, 1, quarter).unwrap();
+        place_rack_item(
+            &conn,
+            "q1",
+            "r1",
+            None,
+            RackItemKind::Router,
+            "r",
+            6,
+            1,
+            quarter,
+        )
+        .unwrap();
 
         // Moving into the other half's slot is rejected; a free row works and
         // the slot moves with the device.
@@ -1687,11 +1840,28 @@ mod tests {
 
         // Updating a half to full width where the row is shared is rejected.
         assert!(matches!(
-            update_rack_item(&conn, "q1", RackItemKind::Router, None, "r", RackItemMetadata::default(), None),
+            update_rack_item(
+                &conn,
+                "q1",
+                RackItemKind::Router,
+                None,
+                "r",
+                RackItemMetadata::default(),
+                None
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
         // Widening where the row is otherwise free is allowed.
-        update_rack_item(&conn, "m2", RackItemKind::GenericDevice, None, "modem-b", RackItemMetadata::default(), None).unwrap();
+        update_rack_item(
+            &conn,
+            "m2",
+            RackItemKind::GenericDevice,
+            None,
+            "modem-b",
+            RackItemMetadata::default(),
+            None,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1703,8 +1873,30 @@ mod tests {
             slot: Some(slot),
             ..RackItemMetadata::default()
         };
-        place_rack_item(&conn, "moving", "r1", None, RackItemKind::GenericDevice, "moving", 42, 1, half(0)).unwrap();
-        place_rack_item(&conn, "blocker", "r1", None, RackItemKind::GenericDevice, "blocker", 41, 1, half(1)).unwrap();
+        place_rack_item(
+            &conn,
+            "moving",
+            "r1",
+            None,
+            RackItemKind::GenericDevice,
+            "moving",
+            42,
+            1,
+            half(0),
+        )
+        .unwrap();
+        place_rack_item(
+            &conn,
+            "blocker",
+            "r1",
+            None,
+            RackItemKind::GenericDevice,
+            "blocker",
+            41,
+            1,
+            half(1),
+        )
+        .unwrap();
 
         // The proposed slot change is valid at U42 by itself, but the combined
         // 2U resize would collide at U41. Neither part may persist on failure.
@@ -1802,8 +1994,7 @@ mod tests {
         )
         .unwrap();
 
-        let updated =
-            update_rack(&conn, "r1", "A12", "Room B", "", None, 48, 1000, None).unwrap();
+        let updated = update_rack(&conn, "r1", "A12", "Room B", "", None, 48, 1000, None).unwrap();
         assert_eq!(updated.items[0].start_u, 49);
     }
 
@@ -1824,7 +2015,8 @@ mod tests {
     #[test]
     fn server_room_persists_without_a_rack() {
         let conn = open_test_db();
-        let created = create_server_room(&conn, "room-empty", "f1", " Empty Room ", "default").unwrap();
+        let created =
+            create_server_room(&conn, "room-empty", "f1", " Empty Room ", "default").unwrap();
         assert_eq!(created.name, "Empty Room");
         assert!(
             list_server_rooms(&conn, "f1")
@@ -1928,9 +2120,25 @@ mod tests {
             Err(ItopsStorageError::Validation(_))
         ));
         assert!(matches!(
-            create_rack(&conn, "r-missing", "f1", "A", "Unknown", "", None, 42, 1000, None),
+            create_rack(
+                &conn,
+                "r-missing",
+                "f1",
+                "A",
+                "Unknown",
+                "",
+                None,
+                42,
+                1000,
+                None
+            ),
             Err(ItopsStorageError::Validation(_))
         ));
-        assert!(create_rack(&conn, "r-valid", "f1", "A", "Room B", "", None, 42, 1000, None).is_ok());
+        assert!(
+            create_rack(
+                &conn, "r-valid", "f1", "A", "Room B", "", None, 42, 1000, None
+            )
+            .is_ok()
+        );
     }
 }

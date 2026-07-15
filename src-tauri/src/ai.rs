@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use github_copilot_sdk::{
-    Client as CopilotSdkClient, CliProgram as CopilotSdkCliProgram,
+    CliProgram as CopilotSdkCliProgram, Client as CopilotSdkClient,
     ClientOptions as CopilotSdkClientOptions, Error as CopilotSdkError,
     ErrorKind as CopilotSdkErrorKind, LogLevel as CopilotSdkLogLevel,
     MessageOptions as CopilotSdkMessageOptions, Model as CopilotSdkModel,
@@ -936,7 +936,11 @@ pub(crate) fn parse_playbook_ai_decision(value: &str) -> Result<PlaybookAiDecisi
     };
     let mut decision: PlaybookAiDecision = serde_json::from_str(candidate)
         .map_err(|error| format!("AI node returned an invalid decision: {error}"))?;
-    decision.reason = decision.reason.split_whitespace().collect::<Vec<_>>().join(" ");
+    decision.reason = decision
+        .reason
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if decision.reason.chars().count() > 500 {
         return Err("AI node decision reason is too long".to_string());
     }
@@ -4579,8 +4583,8 @@ pub(crate) async fn itops_tool(app: &tauri::AppHandle, name: &str, args: Value) 
     use crate::itops::task_commands as itops_task_commands;
     use crate::itops::task_storage as itops_tasks;
     use crate::itops::types::{
-        AutomationAction, BatchTask, HostKind, ItopsTask, RackItemKind,
-        RackItemMetadata, RunHistoryEntry, RunScope, SiteFilter, TaskOperatingSystem, Transport,
+        AutomationAction, BatchTask, HostKind, ItopsTask, RackItemKind, RackItemMetadata,
+        RunHistoryEntry, RunScope, SiteFilter, TaskOperatingSystem, Transport,
     };
     use crate::watchdog::WatchdogRegistry;
     use crate::watchdog::types::{WatchdogAction, WatchdogConfig};
@@ -4602,7 +4606,8 @@ pub(crate) async fn itops_tool(app: &tauri::AppHandle, name: &str, args: Value) 
             .and_then(|value| u32::try_from(value).ok())
     }
     fn required_u32(args: &Value, key: &str) -> Result<u32, String> {
-        optional_u32(args, key).ok_or_else(|| format!("{key} is required and must be a positive integer"))
+        optional_u32(args, key)
+            .ok_or_else(|| format!("{key} is required and must be a positive integer"))
     }
     fn item_kind(args: &Value) -> Result<RackItemKind, String> {
         serde_json::from_value(args.get("kind").cloned().unwrap_or(Value::Null))
@@ -4912,365 +4917,367 @@ pub(crate) async fn itops_tool(app: &tauri::AppHandle, name: &str, args: Value) 
     let result: Result<Value, String> = match delegated {
         Some(result) => result,
         None => storage.with_connection_infallible(|conn| match name {
-        "itops_list_sites" => itops_sites::list_sites(conn)
-            .map(|sites| compact_itops_value(to_value(sites)))
-            .map_err(|e| e.to_string()),
-        "itops_create_site" => {
-            let site_name = required_string(&args, "name")?;
-            let member_ids: Vec<String> = args
-                .get("memberIds")
-                .and_then(Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let transport: Transport = match args.get("transport") {
-                None | Some(Value::Null) => Transport::Auto,
-                Some(value) => serde_json::from_value(value.clone())
-                    .map_err(|_| "transport must be ssh, winrm, psexec, or auto".to_string())?,
-            };
-            let id = new_itops_id("hg");
-            itops_sites::create_site(
-                conn, &id, &site_name, member_ids, None, transport, None, None, None,
-            )
-            .map(|site| compact_itops_value(to_value(site)))
-            .map_err(|e| e.to_string())
-        }
-        "itops_list_server_rooms" => {
-            let site_id = required_string(&args, "siteId")?;
-            itops_topo::list_server_rooms(conn, &site_id)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_create_server_room" => {
-            let site_id = required_string(&args, "siteId")?;
-            let room_name = required_string(&args, "name")?;
-            let floor_color = arg_string(&args, "floorColor");
-            let floor_color = if floor_color.trim().is_empty() {
-                "default".to_string()
-            } else {
-                floor_color
-            };
-            let id = new_itops_id("room");
-            itops_topo::create_server_room(conn, &id, &site_id, &room_name, &floor_color)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_list_racks" => {
-            let site_id = required_string(&args, "siteId")?;
-            itops_topo::list_racks(conn, &site_id)
-                .map(|racks| compact_itops_value(to_value(racks)))
-                .map_err(|e| e.to_string())
-        }
-        "itops_create_rack" => {
-            let site_id = required_string(&args, "siteId")?;
-            let rack_name = required_string(&args, "name")?;
-            let server_room = required_string(&args, "serverRoom")?;
-            let rack_group = arg_string(&args, "rackGroup");
-            let shell = args
-                .get("shell")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            let height_u = optional_u32(&args, "heightU").unwrap_or(42);
-            let depth_mm = optional_u32(&args, "depthMm").unwrap_or(1000);
-            let power_capacity_w = optional_u32(&args, "powerCapacityW");
-            let id = new_itops_id("rack");
-            itops_topo::create_rack(
-                conn,
-                &id,
-                &site_id,
-                &rack_name,
-                &server_room,
-                &rack_group,
-                shell.as_deref(),
-                height_u,
-                depth_mm,
-                power_capacity_w,
-            )
-            .map(|rack| compact_itops_value(to_value(rack)))
-            .map_err(|e| e.to_string())
-        }
-        "itops_place_rack_item" => {
-            let rack_id = required_string(&args, "rackId")?;
-            let kind = item_kind(&args)?;
-            let label = arg_string(&args, "label");
-            let start_u = required_u32(&args, "startU")?;
-            let height_u = required_u32(&args, "heightU")?;
-            let metadata = item_metadata(&args)?;
-            let id = new_itops_id("ri");
-            itops_topo::place_rack_item(
-                conn,
-                &id,
-                &rack_id,
-                optional_connection_id(&args),
-                kind,
-                &label,
-                start_u,
-                height_u,
-                metadata,
-            )
-            .map(to_value)
-            .map_err(|e| e.to_string())
-        }
-        "itops_update_rack_item" => {
-            let id = required_string(&args, "id")?;
-            let kind = item_kind(&args)?;
-            let label = arg_string(&args, "label");
-            let metadata = item_metadata(&args)?;
-            itops_topo::update_rack_item(
-                conn,
-                &id,
-                kind,
-                optional_connection_id(&args),
-                &label,
-                metadata,
-                None,
-            )
-            .map(to_value)
-            .map_err(|e| e.to_string())
-        }
-        "itops_move_rack_item" => {
-            let id = required_string(&args, "id")?;
-            let rack_id = required_string(&args, "rackId")?;
-            let start_u = required_u32(&args, "startU")?;
-            let height_u = required_u32(&args, "heightU")?;
-            itops_topo::move_rack_item(conn, &id, &rack_id, start_u, height_u, None)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_remove_rack_item" => {
-            let id = required_string(&args, "id")?;
-            itops_topo::remove_rack_item(conn, &id)
-                .map(|_| json!({"ok": true}))
-                .map_err(|e| e.to_string())
-        }
-        "itops_list_hosts" => {
-            let site_id = required_string(&args, "siteId")?;
-            itops_hosts::list_hosts(conn, &site_id)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_update_site" => {
-            let id = required_string(&args, "id")?;
-            let existing = itops_sites::list_sites(conn)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .find(|site| site.id == id)
-                .ok_or_else(|| "site not found".to_string())?;
-            let site_name = optional_string(&args, "name").unwrap_or_else(|| existing.name.clone());
-            let member_ids =
-                string_array(&args, "memberIds").unwrap_or_else(|| existing.member_ids.clone());
-            let filter: Option<SiteFilter> = match args.get("filter") {
-                None => existing.filter.clone(),
-                Some(Value::Null) => None,
-                Some(value) => Some(
-                    serde_json::from_value(value.clone())
-                        .map_err(|error| format!("invalid filter: {error}"))?,
-                ),
-            };
-            let transport: Transport = match args.get("transport") {
-                None | Some(Value::Null) => existing.transport,
-                Some(value) => serde_json::from_value(value.clone())
-                    .map_err(|_| "transport must be ssh, winrm, psexec, or auto".to_string())?,
-            };
-            itops_sites::update_site(
-                conn,
-                &id,
-                &site_name,
-                member_ids,
-                filter,
-                transport,
-                existing.icon_color.as_deref(),
-                existing.icon_data_url.as_deref(),
-                existing.icon_background_color.as_deref(),
-            )
-            .map(|site| compact_itops_value(to_value(site)))
-            .map_err(|e| e.to_string())
-        }
-        "itops_remove_site" => {
-            let id = required_string(&args, "id")?;
-            itops_sites::remove_site(conn, &id)
-                .map(|_| json!({"ok": true}))
-                .map_err(|e| e.to_string())
-        }
-        "itops_update_server_room" => {
-            let id = required_string(&args, "id")?;
-            let room_name = required_string(&args, "name")?;
-            let floor_color = required_string(&args, "floorColor")?;
-            itops_topo::update_server_room(conn, &id, &room_name, &floor_color)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_delete_server_room" => {
-            let id = required_string(&args, "id")?;
-            itops_topo::delete_server_room(conn, &id)
-                .map(|_| json!({"ok": true}))
-                .map_err(|e| e.to_string())
-        }
-        "itops_update_rack" => {
-            let id = required_string(&args, "id")?;
-            let rack_name = required_string(&args, "name")?;
-            let server_room = required_string(&args, "serverRoom")?;
-            let rack_group = arg_string(&args, "rackGroup");
-            let shell = args
-                .get("shell")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            let height_u = required_u32(&args, "heightU")?;
-            let depth_mm = required_u32(&args, "depthMm")?;
-            let power_capacity_w = optional_u32(&args, "powerCapacityW");
-            itops_topo::update_rack(
-                conn,
-                &id,
-                &rack_name,
-                &server_room,
-                &rack_group,
-                shell.as_deref(),
-                height_u,
-                depth_mm,
-                power_capacity_w,
-            )
-            .map(|rack| compact_itops_value(to_value(rack)))
-            .map_err(|e| e.to_string())
-        }
-        "itops_delete_rack" => {
-            let id = required_string(&args, "id")?;
-            itops_topo::delete_rack(conn, &id)
-                .map(|_| json!({"ok": true}))
-                .map_err(|e| e.to_string())
-        }
-        "itops_create_host" => {
-            let site_id = required_string(&args, "siteId")?;
-            let hostname = required_string(&args, "hostname")?;
-            let label = arg_string(&args, "label");
-            let kind = parse_host_kind(&args)?;
-            let parent_host_id = optional_string(&args, "parentHostId");
-            let notes = arg_string(&args, "notes");
-            let id = new_itops_id("host");
-            itops_hosts::create_host(
-                conn,
-                &id,
-                &site_id,
-                &hostname,
-                &label,
-                kind,
-                parent_host_id.as_deref(),
-                &notes,
-            )
-            .map(to_value)
-            .map_err(|e| e.to_string())
-        }
-        "itops_update_host" => {
-            let id = required_string(&args, "id")?;
-            let hostname = required_string(&args, "hostname")?;
-            let label = arg_string(&args, "label");
-            let kind = parse_host_kind(&args)?;
-            let parent_host_id = optional_string(&args, "parentHostId");
-            let connection_ids = string_array(&args, "connectionIds").unwrap_or_default();
-            let notes = arg_string(&args, "notes");
-            itops_hosts::update_host(
-                conn,
-                &id,
-                &hostname,
-                &label,
-                kind,
-                parent_host_id.as_deref(),
-                connection_ids,
-                &notes,
-            )
-            .map(to_value)
-            .map_err(|e| e.to_string())
-        }
-        "itops_delete_host" => {
-            let id = required_string(&args, "id")?;
-            itops_hosts::delete_host(conn, &id)
-                .map(|_| json!({"ok": true}))
-                .map_err(|e| e.to_string())
-        }
-        "itops_import_hosts" => {
-            let site_id = required_string(&args, "siteId")?;
-            let hostnames = string_array(&args, "hostnames").unwrap_or_default();
-            if hostnames.is_empty() {
-                return Err("hostnames is required".to_string());
-            }
-            itops_hosts::import_hosts(conn, &site_id, &hostnames, || new_itops_id("host"))
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_list_tasks" => itops_tasks::list_tasks(conn)
-            .map(compact_task_list)
-            .map_err(|e| e.to_string()),
-        "itops_get_task" => {
-            let id = required_string(&args, "id")?;
-            itops_tasks::get_task(conn, &id)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "task not found".to_string())
-                .map(to_value)
-        }
-        "itops_create_task" => {
-            let task_name = required_string(&args, "name")?;
-            let description = arg_string(&args, "description");
-            let applicable_os = parse_applicable_os(&args)?;
-            let task = parse_batch_task(args.get("task"))?;
-            validate_assistant_task(&task, None)?;
-            let id = new_itops_id("task");
-            itops_tasks::create_task(conn, &id, &task_name, &description, &applicable_os, &task)
-                .map(to_value)
-                .map_err(|e| e.to_string())
-        }
-        "itops_list_automations" => itops_autos::list_automations(conn)
-            .map(to_value)
-            .map_err(|e| e.to_string()),
-        "itops_list_run_history" => {
-            let limit = optional_u32(&args, "limit").unwrap_or(20).clamp(1, 100) as usize;
-            let site_filter = optional_string(&args, "siteId");
-            itops_runs::list_run_history(conn, 500)
-                .map(|entries| {
-                    Value::Array(
-                        entries
+            "itops_list_sites" => itops_sites::list_sites(conn)
+                .map(|sites| compact_itops_value(to_value(sites)))
+                .map_err(|e| e.to_string()),
+            "itops_create_site" => {
+                let site_name = required_string(&args, "name")?;
+                let member_ids: Vec<String> = args
+                    .get("memberIds")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
                             .iter()
-                            .filter(|entry| {
-                                site_filter
-                                    .as_deref()
-                                    .is_none_or(|site| entry.site_id.as_deref() == Some(site))
-                            })
-                            .take(limit)
-                            .map(compact_run_entry)
-                            .collect(),
-                    )
-                })
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let transport: Transport = match args.get("transport") {
+                    None | Some(Value::Null) => Transport::Auto,
+                    Some(value) => serde_json::from_value(value.clone())
+                        .map_err(|_| "transport must be ssh, winrm, psexec, or auto".to_string())?,
+                };
+                let id = new_itops_id("hg");
+                itops_sites::create_site(
+                    conn, &id, &site_name, member_ids, None, transport, None, None, None,
+                )
+                .map(|site| compact_itops_value(to_value(site)))
                 .map_err(|e| e.to_string())
-        }
-        "itops_get_run_report" => {
-            let run_id = required_string(&args, "runId")?;
-            let max_chars =
-                optional_u32(&args, "maxOutputChars").unwrap_or(4000).clamp(100, 20_000) as usize;
-            let entry = itops_runs::list_run_history(conn, 500)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .find(|entry| entry.id == run_id)
-                .ok_or_else(|| "run not found".to_string())?;
-            let mut value = compact_run_entry(&entry);
-            if let Some(hosts) = value
-                .pointer_mut("/report/hosts")
-                .and_then(Value::as_array_mut)
-            {
-                for (host_value, host) in hosts.iter_mut().zip(entry.report.hosts.iter()) {
-                    if let Some(object) = host_value.as_object_mut() {
-                        object.insert(
-                            "output".to_string(),
-                            Value::String(tail_chars(&host.output, max_chars)),
-                        );
+            }
+            "itops_list_server_rooms" => {
+                let site_id = required_string(&args, "siteId")?;
+                itops_topo::list_server_rooms(conn, &site_id)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_create_server_room" => {
+                let site_id = required_string(&args, "siteId")?;
+                let room_name = required_string(&args, "name")?;
+                let floor_color = arg_string(&args, "floorColor");
+                let floor_color = if floor_color.trim().is_empty() {
+                    "default".to_string()
+                } else {
+                    floor_color
+                };
+                let id = new_itops_id("room");
+                itops_topo::create_server_room(conn, &id, &site_id, &room_name, &floor_color)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_list_racks" => {
+                let site_id = required_string(&args, "siteId")?;
+                itops_topo::list_racks(conn, &site_id)
+                    .map(|racks| compact_itops_value(to_value(racks)))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_create_rack" => {
+                let site_id = required_string(&args, "siteId")?;
+                let rack_name = required_string(&args, "name")?;
+                let server_room = required_string(&args, "serverRoom")?;
+                let rack_group = arg_string(&args, "rackGroup");
+                let shell = args
+                    .get("shell")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let height_u = optional_u32(&args, "heightU").unwrap_or(42);
+                let depth_mm = optional_u32(&args, "depthMm").unwrap_or(1000);
+                let power_capacity_w = optional_u32(&args, "powerCapacityW");
+                let id = new_itops_id("rack");
+                itops_topo::create_rack(
+                    conn,
+                    &id,
+                    &site_id,
+                    &rack_name,
+                    &server_room,
+                    &rack_group,
+                    shell.as_deref(),
+                    height_u,
+                    depth_mm,
+                    power_capacity_w,
+                )
+                .map(|rack| compact_itops_value(to_value(rack)))
+                .map_err(|e| e.to_string())
+            }
+            "itops_place_rack_item" => {
+                let rack_id = required_string(&args, "rackId")?;
+                let kind = item_kind(&args)?;
+                let label = arg_string(&args, "label");
+                let start_u = required_u32(&args, "startU")?;
+                let height_u = required_u32(&args, "heightU")?;
+                let metadata = item_metadata(&args)?;
+                let id = new_itops_id("ri");
+                itops_topo::place_rack_item(
+                    conn,
+                    &id,
+                    &rack_id,
+                    optional_connection_id(&args),
+                    kind,
+                    &label,
+                    start_u,
+                    height_u,
+                    metadata,
+                )
+                .map(to_value)
+                .map_err(|e| e.to_string())
+            }
+            "itops_update_rack_item" => {
+                let id = required_string(&args, "id")?;
+                let kind = item_kind(&args)?;
+                let label = arg_string(&args, "label");
+                let metadata = item_metadata(&args)?;
+                itops_topo::update_rack_item(
+                    conn,
+                    &id,
+                    kind,
+                    optional_connection_id(&args),
+                    &label,
+                    metadata,
+                    None,
+                )
+                .map(to_value)
+                .map_err(|e| e.to_string())
+            }
+            "itops_move_rack_item" => {
+                let id = required_string(&args, "id")?;
+                let rack_id = required_string(&args, "rackId")?;
+                let start_u = required_u32(&args, "startU")?;
+                let height_u = required_u32(&args, "heightU")?;
+                itops_topo::move_rack_item(conn, &id, &rack_id, start_u, height_u, None)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_remove_rack_item" => {
+                let id = required_string(&args, "id")?;
+                itops_topo::remove_rack_item(conn, &id)
+                    .map(|_| json!({"ok": true}))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_list_hosts" => {
+                let site_id = required_string(&args, "siteId")?;
+                itops_hosts::list_hosts(conn, &site_id)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_update_site" => {
+                let id = required_string(&args, "id")?;
+                let existing = itops_sites::list_sites(conn)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .find(|site| site.id == id)
+                    .ok_or_else(|| "site not found".to_string())?;
+                let site_name =
+                    optional_string(&args, "name").unwrap_or_else(|| existing.name.clone());
+                let member_ids =
+                    string_array(&args, "memberIds").unwrap_or_else(|| existing.member_ids.clone());
+                let filter: Option<SiteFilter> = match args.get("filter") {
+                    None => existing.filter.clone(),
+                    Some(Value::Null) => None,
+                    Some(value) => Some(
+                        serde_json::from_value(value.clone())
+                            .map_err(|error| format!("invalid filter: {error}"))?,
+                    ),
+                };
+                let transport: Transport = match args.get("transport") {
+                    None | Some(Value::Null) => existing.transport,
+                    Some(value) => serde_json::from_value(value.clone())
+                        .map_err(|_| "transport must be ssh, winrm, psexec, or auto".to_string())?,
+                };
+                itops_sites::update_site(
+                    conn,
+                    &id,
+                    &site_name,
+                    member_ids,
+                    filter,
+                    transport,
+                    existing.icon_color.as_deref(),
+                    existing.icon_data_url.as_deref(),
+                    existing.icon_background_color.as_deref(),
+                )
+                .map(|site| compact_itops_value(to_value(site)))
+                .map_err(|e| e.to_string())
+            }
+            "itops_remove_site" => {
+                let id = required_string(&args, "id")?;
+                itops_sites::remove_site(conn, &id)
+                    .map(|_| json!({"ok": true}))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_update_server_room" => {
+                let id = required_string(&args, "id")?;
+                let room_name = required_string(&args, "name")?;
+                let floor_color = required_string(&args, "floorColor")?;
+                itops_topo::update_server_room(conn, &id, &room_name, &floor_color)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_delete_server_room" => {
+                let id = required_string(&args, "id")?;
+                itops_topo::delete_server_room(conn, &id)
+                    .map(|_| json!({"ok": true}))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_update_rack" => {
+                let id = required_string(&args, "id")?;
+                let rack_name = required_string(&args, "name")?;
+                let server_room = required_string(&args, "serverRoom")?;
+                let rack_group = arg_string(&args, "rackGroup");
+                let shell = args
+                    .get("shell")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let height_u = required_u32(&args, "heightU")?;
+                let depth_mm = required_u32(&args, "depthMm")?;
+                let power_capacity_w = optional_u32(&args, "powerCapacityW");
+                itops_topo::update_rack(
+                    conn,
+                    &id,
+                    &rack_name,
+                    &server_room,
+                    &rack_group,
+                    shell.as_deref(),
+                    height_u,
+                    depth_mm,
+                    power_capacity_w,
+                )
+                .map(|rack| compact_itops_value(to_value(rack)))
+                .map_err(|e| e.to_string())
+            }
+            "itops_delete_rack" => {
+                let id = required_string(&args, "id")?;
+                itops_topo::delete_rack(conn, &id)
+                    .map(|_| json!({"ok": true}))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_create_host" => {
+                let site_id = required_string(&args, "siteId")?;
+                let hostname = required_string(&args, "hostname")?;
+                let label = arg_string(&args, "label");
+                let kind = parse_host_kind(&args)?;
+                let parent_host_id = optional_string(&args, "parentHostId");
+                let notes = arg_string(&args, "notes");
+                let id = new_itops_id("host");
+                itops_hosts::create_host(
+                    conn,
+                    &id,
+                    &site_id,
+                    &hostname,
+                    &label,
+                    kind,
+                    parent_host_id.as_deref(),
+                    &notes,
+                )
+                .map(to_value)
+                .map_err(|e| e.to_string())
+            }
+            "itops_update_host" => {
+                let id = required_string(&args, "id")?;
+                let hostname = required_string(&args, "hostname")?;
+                let label = arg_string(&args, "label");
+                let kind = parse_host_kind(&args)?;
+                let parent_host_id = optional_string(&args, "parentHostId");
+                let connection_ids = string_array(&args, "connectionIds").unwrap_or_default();
+                let notes = arg_string(&args, "notes");
+                itops_hosts::update_host(
+                    conn,
+                    &id,
+                    &hostname,
+                    &label,
+                    kind,
+                    parent_host_id.as_deref(),
+                    connection_ids,
+                    &notes,
+                )
+                .map(to_value)
+                .map_err(|e| e.to_string())
+            }
+            "itops_delete_host" => {
+                let id = required_string(&args, "id")?;
+                itops_hosts::delete_host(conn, &id)
+                    .map(|_| json!({"ok": true}))
+                    .map_err(|e| e.to_string())
+            }
+            "itops_import_hosts" => {
+                let site_id = required_string(&args, "siteId")?;
+                let hostnames = string_array(&args, "hostnames").unwrap_or_default();
+                if hostnames.is_empty() {
+                    return Err("hostnames is required".to_string());
+                }
+                itops_hosts::import_hosts(conn, &site_id, &hostnames, || new_itops_id("host"))
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_list_tasks" => itops_tasks::list_tasks(conn)
+                .map(compact_task_list)
+                .map_err(|e| e.to_string()),
+            "itops_get_task" => {
+                let id = required_string(&args, "id")?;
+                itops_tasks::get_task(conn, &id)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "task not found".to_string())
+                    .map(to_value)
+            }
+            "itops_create_task" => {
+                let task_name = required_string(&args, "name")?;
+                let description = arg_string(&args, "description");
+                let applicable_os = parse_applicable_os(&args)?;
+                let task = parse_batch_task(args.get("task"))?;
+                validate_assistant_task(&task, None)?;
+                let id = new_itops_id("task");
+                itops_tasks::create_task(conn, &id, &task_name, &description, &applicable_os, &task)
+                    .map(to_value)
+                    .map_err(|e| e.to_string())
+            }
+            "itops_list_automations" => itops_autos::list_automations(conn)
+                .map(to_value)
+                .map_err(|e| e.to_string()),
+            "itops_list_run_history" => {
+                let limit = optional_u32(&args, "limit").unwrap_or(20).clamp(1, 100) as usize;
+                let site_filter = optional_string(&args, "siteId");
+                itops_runs::list_run_history(conn, 500)
+                    .map(|entries| {
+                        Value::Array(
+                            entries
+                                .iter()
+                                .filter(|entry| {
+                                    site_filter
+                                        .as_deref()
+                                        .is_none_or(|site| entry.site_id.as_deref() == Some(site))
+                                })
+                                .take(limit)
+                                .map(compact_run_entry)
+                                .collect(),
+                        )
+                    })
+                    .map_err(|e| e.to_string())
+            }
+            "itops_get_run_report" => {
+                let run_id = required_string(&args, "runId")?;
+                let max_chars = optional_u32(&args, "maxOutputChars")
+                    .unwrap_or(4000)
+                    .clamp(100, 20_000) as usize;
+                let entry = itops_runs::list_run_history(conn, 500)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .find(|entry| entry.id == run_id)
+                    .ok_or_else(|| "run not found".to_string())?;
+                let mut value = compact_run_entry(&entry);
+                if let Some(hosts) = value
+                    .pointer_mut("/report/hosts")
+                    .and_then(Value::as_array_mut)
+                {
+                    for (host_value, host) in hosts.iter_mut().zip(entry.report.hosts.iter()) {
+                        if let Some(object) = host_value.as_object_mut() {
+                            object.insert(
+                                "output".to_string(),
+                                Value::String(tail_chars(&host.output, max_chars)),
+                            );
+                        }
                     }
                 }
+                Ok(value)
             }
-            Ok(value)
-        }
-        _ => Err(format!("unknown IT Ops tool: {name}")),
+            _ => Err(format!("unknown IT Ops tool: {name}")),
         }),
     };
     match result {

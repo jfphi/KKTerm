@@ -1,6 +1,7 @@
 #[cfg(target_os = "windows")]
 use crate::windows_local_pty;
 use crate::{secrets, serial, ssh, storage, telnet, x_server};
+use encoding_rs::{Encoding, UTF_8};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,7 +12,7 @@ use std::{
     net::{IpAddr, TcpListener as StdTcpListener},
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
-    sync::Mutex,
+    sync::{Arc, Mutex, RwLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -27,6 +28,7 @@ pub struct SessionManager {
 
 struct TerminalSession {
     transport: TerminalTransport,
+    encoding: TerminalEncodingState,
 }
 
 struct SshPortForwardSession {
@@ -93,6 +95,44 @@ pub struct StartTerminalSessionRequest {
     pub use_psmux: Option<bool>,
     pub psmux_session_id: Option<String>,
     pub ssh_buffer_lines: Option<u32>,
+    #[serde(default = "default_terminal_encoding")]
+    pub text_encoding: String,
+}
+
+fn default_terminal_encoding() -> String {
+    "utf-8".to_string()
+}
+
+#[derive(Clone)]
+pub(crate) struct TerminalEncodingState(Arc<RwLock<String>>);
+
+impl TerminalEncodingState {
+    pub(crate) fn new(label: &str) -> Result<Self, String> {
+        let normalized = terminal_encoding(label)?;
+        Ok(Self(Arc::new(RwLock::new(
+            normalized.name().to_ascii_lowercase(),
+        ))))
+    }
+    fn label(&self) -> String {
+        self.0
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_else(|_| "utf-8".to_string())
+    }
+    fn set(&self, label: &str) -> Result<(), String> {
+        let normalized = terminal_encoding(label)?.name().to_ascii_lowercase();
+        *self
+            .0
+            .write()
+            .map_err(|_| "terminal encoding lock is poisoned".to_string())? = normalized;
+        Ok(())
+    }
+}
+
+fn terminal_encoding(label: &str) -> Result<&'static Encoding, String> {
+    Encoding::for_label(label.trim().as_bytes())
+        .filter(|encoding| !matches!(encoding.name(), "UTF-16LE" | "UTF-16BE" | "replacement"))
+        .ok_or_else(|| format!("unsupported terminal text encoding: {label}"))
 }
 
 #[derive(Deserialize)]
@@ -323,6 +363,13 @@ pub struct ResizeTerminalRequest {
     pixel_height: Option<u16>,
     pixel_width: Option<u16>,
     rows: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetTerminalEncodingRequest {
+    session_id: String,
+    encoding: String,
 }
 
 struct ActiveTerminalRecording {
@@ -623,65 +670,51 @@ pub(crate) fn emit_terminal_output(app: &AppHandle, session_id: &str, data: Stri
     );
 }
 
-#[derive(Default)]
 pub(crate) struct TerminalOutputDecoder {
-    pending: Vec<u8>,
+    state: TerminalEncodingState,
+    label: String,
+    decoder: encoding_rs::Decoder,
+}
+
+impl Default for TerminalOutputDecoder {
+    fn default() -> Self {
+        Self::new(TerminalEncodingState::new("utf-8").expect("UTF-8 exists"))
+    }
 }
 
 impl TerminalOutputDecoder {
+    pub(crate) fn new(state: TerminalEncodingState) -> Self {
+        let label = state.label();
+        let decoder = terminal_encoding(&label).unwrap_or(UTF_8).new_decoder();
+        Self {
+            state,
+            label,
+            decoder,
+        }
+    }
+
+    fn sync_encoding(&mut self) {
+        let label = self.state.label();
+        if label != self.label {
+            self.label = label;
+            self.decoder = terminal_encoding(&self.label)
+                .unwrap_or(UTF_8)
+                .new_decoder();
+        }
+    }
+
     pub(crate) fn decode(&mut self, bytes: &[u8]) -> Option<String> {
-        if bytes.is_empty() {
-            return None;
-        }
-
-        let mut combined;
-        let mut remaining = if self.pending.is_empty() {
-            bytes
-        } else {
-            combined = std::mem::take(&mut self.pending);
-            combined.extend_from_slice(bytes);
-            &combined
-        };
-        let mut output = String::new();
-
-        loop {
-            match std::str::from_utf8(remaining) {
-                Ok(valid) => {
-                    output.push_str(valid);
-                    break;
-                }
-                Err(error) => {
-                    let valid_up_to = error.valid_up_to();
-                    if valid_up_to > 0 {
-                        output.push_str(
-                            std::str::from_utf8(&remaining[..valid_up_to])
-                                .expect("valid_up_to must bound valid UTF-8"),
-                        );
-                    }
-
-                    match error.error_len() {
-                        Some(invalid_len) => {
-                            output.push('\u{FFFD}');
-                            remaining = &remaining[valid_up_to + invalid_len..];
-                        }
-                        None => {
-                            self.pending.extend_from_slice(&remaining[valid_up_to..]);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
+        self.sync_encoding();
+        let mut output = String::with_capacity(bytes.len() * 3 + 8);
+        let _ = self.decoder.decode_to_string(bytes, &mut output, false);
         (!output.is_empty()).then_some(output)
     }
 
     pub(crate) fn finish_lossy(&mut self) -> Option<String> {
-        if self.pending.is_empty() {
-            return None;
-        }
-        let pending = std::mem::take(&mut self.pending);
-        Some(String::from_utf8_lossy(&pending).to_string())
+        self.sync_encoding();
+        let mut output = String::with_capacity(8);
+        let _ = self.decoder.decode_to_string(b"", &mut output, true);
+        (!output.is_empty()).then_some(output)
     }
 }
 
@@ -838,6 +871,7 @@ impl SessionManager {
             .session_id
             .clone()
             .unwrap_or_else(|| make_session_id(&request.title));
+        let encoding = TerminalEncodingState::new(&request.text_encoding)?;
         let is_local_start = request.connection_type.trim().eq_ignore_ascii_case("local");
         let password = connection_password_for(secrets, &request);
         let mut managed_x_server_display = None;
@@ -870,6 +904,7 @@ impl SessionManager {
                     password,
                     cols: request.cols.unwrap_or(80),
                     rows: request.rows.unwrap_or(24),
+                    encoding: encoding.clone(),
                 },
             )?;
             self.sessions
@@ -879,6 +914,7 @@ impl SessionManager {
                     session_id.clone(),
                     TerminalSession {
                         transport: TerminalTransport::NativeTelnet(session),
+                        encoding,
                     },
                 );
             return Ok(TerminalSessionStarted {
@@ -906,6 +942,7 @@ impl SessionManager {
                         .serial_speed
                         .or(request.port.map(u32::from))
                         .unwrap_or(9600),
+                    encoding: encoding.clone(),
                 },
             )?;
             self.sessions
@@ -915,6 +952,7 @@ impl SessionManager {
                     session_id.clone(),
                     TerminalSession {
                         transport: TerminalTransport::NativeSerial(session),
+                        encoding,
                     },
                 );
             return Ok(TerminalSessionStarted {
@@ -951,6 +989,7 @@ impl SessionManager {
                     socks_proxy: request.ssh_socks_proxy.clone(),
                     compression: request.ssh_compression.unwrap_or(true),
                     old_protocols: request.ssh_old_protocols.unwrap_or(false),
+                    encoding: encoding.clone(),
                 },
             ) {
                 Ok(session) => {
@@ -963,6 +1002,7 @@ impl SessionManager {
                             session_id.clone(),
                             TerminalSession {
                                 transport: TerminalTransport::NativeSsh(session),
+                                encoding,
                             },
                         );
                     return Ok(TerminalSessionStarted {
@@ -995,6 +1035,7 @@ impl SessionManager {
                     writer: local_pty.writer,
                     child: local_pty.child,
                 },
+                encoding: encoding.clone(),
             };
             self.sessions
                 .lock()
@@ -1005,7 +1046,7 @@ impl SessionManager {
             thread::spawn(move || {
                 let mut reader = local_pty.reader;
                 let mut buffer = [0_u8; 8192];
-                let mut decoder = TerminalOutputDecoder::default();
+                let mut decoder = TerminalOutputDecoder::new(encoding);
                 loop {
                     match reader.read(&mut buffer) {
                         Ok(0) => {
@@ -1066,6 +1107,7 @@ impl SessionManager {
                 writer,
                 child,
             },
+            encoding: encoding.clone(),
         };
         self.sessions
             .lock()
@@ -1075,7 +1117,7 @@ impl SessionManager {
         let output_session_id = session_id.clone();
         thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
-            let mut decoder = TerminalOutputDecoder::default();
+            let mut decoder = TerminalOutputDecoder::new(encoding);
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => {
@@ -1555,19 +1597,35 @@ impl SessionManager {
         let session = sessions
             .get_mut(&request.session_id)
             .ok_or_else(|| "terminal session was not found".to_string())?;
+        let input = String::from_utf8(request.data)
+            .map_err(|_| "terminal input must be valid UTF-8".to_string())?;
+        let encoding = terminal_encoding(&session.encoding.label())?;
+        let (encoded, _, _) = encoding.encode(&input);
+        let data = encoded.into_owned();
         match &mut session.transport {
             TerminalTransport::Pty { writer, .. } => {
                 writer
-                    .write_all(&request.data)
+                    .write_all(&data)
                     .map_err(|error| format!("failed to write terminal input: {error}"))?;
                 writer
                     .flush()
                     .map_err(|error| format!("failed to flush terminal input: {error}"))
             }
-            TerminalTransport::NativeSsh(session) => session.write_input(request.data),
-            TerminalTransport::NativeTelnet(session) => session.write_input(request.data),
-            TerminalTransport::NativeSerial(session) => session.write_input(request.data),
+            TerminalTransport::NativeSsh(session) => session.write_input(data),
+            TerminalTransport::NativeTelnet(session) => session.write_input(data),
+            TerminalTransport::NativeSerial(session) => session.write_input(data),
         }
+    }
+
+    pub fn set_terminal_encoding(&self, request: SetTerminalEncodingRequest) -> Result<(), String> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "terminal session lock is poisoned".to_string())?;
+        let session = sessions
+            .get(&request.session_id)
+            .ok_or_else(|| "terminal session was not found".to_string())?;
+        session.encoding.set(&request.encoding)
     }
 
     pub fn resize_terminal(&self, request: ResizeTerminalRequest) -> Result<(), String> {
@@ -2132,6 +2190,7 @@ fn terminal_request_for_tmux(request: &TmuxConnectionRequest) -> StartTerminalSe
         use_psmux: None,
         psmux_session_id: None,
         ssh_buffer_lines: None,
+        text_encoding: default_terminal_encoding(),
     }
 }
 
@@ -3412,6 +3471,16 @@ mod tests {
     }
 
     #[test]
+    fn terminal_output_decoder_switches_to_big5_for_live_session() {
+        let state = TerminalEncodingState::new("utf-8").expect("UTF-8 encoding");
+        let mut decoder = TerminalOutputDecoder::new(state.clone());
+        state.set("big5").expect("Big5 encoding");
+        let (bytes, _, had_errors) = encoding_rs::BIG5.encode("中文");
+        assert!(!had_errors);
+        assert_eq!(decoder.decode(&bytes), Some("中文".to_string()));
+    }
+
+    #[test]
     fn appimage_path_list_filter_keeps_user_entries_only() {
         use crate::linux_env::filter_appimage_path_list;
 
@@ -3596,6 +3665,7 @@ mod tests {
             use_psmux: None,
             psmux_session_id: None,
             ssh_buffer_lines: None,
+            text_encoding: default_terminal_encoding(),
         }
     }
 
@@ -3736,6 +3806,7 @@ mod tests {
             use_psmux: None,
             psmux_session_id: None,
             ssh_buffer_lines: None,
+            text_encoding: default_terminal_encoding(),
         }
     }
 

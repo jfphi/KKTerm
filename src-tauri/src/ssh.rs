@@ -248,6 +248,7 @@ pub struct NativeSshTerminalRequest {
     pub socks_proxy: Option<String>,
     pub compression: bool,
     pub old_protocols: bool,
+    pub encoding: crate::sessions::TerminalEncodingState,
 }
 
 #[derive(Clone)]
@@ -590,6 +591,7 @@ pub fn start_native_terminal(
         socks_proxy: request.socks_proxy,
         compression: request.compression,
         old_protocols: request.old_protocols,
+        encoding: request.encoding,
     };
     ssh_debug(
         "terminal.start",
@@ -1393,7 +1395,7 @@ async fn run_native_terminal_once(
     // forward-drain below before this function returns and the tokio runtime is
     // torn down. See `forward_tasks` for why draining in-context matters.
     let outcome: Result<TerminalRunOutcome, String> = async {
-        let mut output_decoder = crate::sessions::TerminalOutputDecoder::default();
+        let mut output_decoder = crate::sessions::TerminalOutputDecoder::new(request.encoding.clone());
         loop {
         tokio::select! {
             control = control_rx.recv() => {
@@ -3994,6 +3996,8 @@ mod tests {
             socks_proxy: None,
             compression: true,
             old_protocols: false,
+            encoding: crate::sessions::TerminalEncodingState::new("utf-8")
+                .expect("UTF-8 encoding"),
         }
     }
 

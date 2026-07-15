@@ -2775,6 +2775,7 @@
     "noRecordings": "このConnectionには録画がありません。",
     "recordingMetadata": "{{metadata}}",
     "font": "フォント",
+    "textEncoding": "テキストエンコーディング",
     "increaseSize": "サイズを大きく",
     "decreaseSize": "サイズを小さく",
     "resetSize": "サイズをリセット",

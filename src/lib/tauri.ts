@@ -185,6 +185,7 @@ export interface StartTerminalSessionRequest {
   usePsmux?: boolean;
   psmuxSessionId?: string;
   sshBufferLines?: number;
+  textEncoding?: string;
 }
 
 export interface TerminalSessionStarted {
@@ -2096,6 +2097,10 @@ type CommandMap = {
         rows: number;
       };
     };
+    result: null;
+  };
+  set_terminal_encoding: {
+    args: { request: { sessionId: string; encoding: string } };
     result: null;
   };
   close_terminal_session: {

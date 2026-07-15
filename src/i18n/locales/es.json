@@ -2775,6 +2775,7 @@
     "noRecordings": "No hay grabaciones para esta conexión.",
     "recordingMetadata": "{{metadata}}",
     "font": "Fuente",
+    "textEncoding": "Codificación de texto",
     "increaseSize": "Aumentar tamaño",
     "decreaseSize": "Disminuir tamaño",
     "resetSize": "Restablecer tamaño",

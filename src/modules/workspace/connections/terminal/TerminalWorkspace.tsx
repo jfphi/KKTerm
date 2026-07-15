@@ -42,6 +42,7 @@ import {
   unregisterPaneRenderer,
 } from "../../paneRegistry";
 import type { Connection, LayoutNode, SplitDirection, TerminalPane, WorkspacePane, WorkspaceTab } from "../../../../types";
+import { TERMINAL_ENCODING_OPTIONS, normalizeTerminalEncoding } from "./terminalEncoding";
 import { QuickCommandBar } from "./QuickCommandBar";
 import { TerminalBackgroundLayer, TerminalBackgroundPopover } from "./TerminalBackgroundPopover";
 import { SshPortForwardingDialog, hasEnabledSshPortForwardings } from "./SshPortForwardingDialog";
@@ -1716,6 +1717,7 @@ function TerminalPaneView({
   const updateOpenConnectionTerminalColorScheme = useWorkspaceStore((state) => state.updateOpenConnectionTerminalColorScheme);
   const updateOpenTerminalPaneAppearance = useWorkspaceStore((state) => state.updateOpenTerminalPaneAppearance);
   const updateOpenTerminalPaneBackground = useWorkspaceStore((state) => state.updateOpenTerminalPaneBackground);
+  const updateOpenTerminalPaneTextEncoding = useWorkspaceStore((state) => state.updateOpenTerminalPaneTextEncoding);
   const updateOpenTerminalPaneX11ForwardingStatus = useWorkspaceStore((state) => state.updateOpenTerminalPaneX11ForwardingStatus);
   const setOpenTerminalPaneSshForwardFailures = useWorkspaceStore((state) => state.setOpenTerminalPaneSshForwardFailures);
   const markOpenTerminalPaneTmuxUnavailable = useWorkspaceStore((state) => state.markOpenTerminalPaneTmuxUnavailable);
@@ -2296,6 +2298,7 @@ function TerminalPaneView({
             sshCompression:
               connection.type === "ssh" ? resolveSshCompression(connection, sshSettings) : undefined,
             sshOldProtocols: connection.type === "ssh" ? resolveSshOldProtocols(connection, sshSettings) : undefined,
+            textEncoding: normalizeTerminalEncoding(pane.textEncoding),
           },
         });
         if (disposed) {
@@ -2778,6 +2781,21 @@ function TerminalPaneView({
     });
     setRecordingInfo(started);
     showStatusBarNotice(t("terminal.recordingStarted"));
+  }
+
+  async function handleTextEncodingChange(encoding: string) {
+    const normalized = normalizeTerminalEncoding(encoding);
+    const sessionId = sessionIdRef.current;
+    try {
+      if (sessionId && isTauriRuntime()) {
+        await invokeCommand("set_terminal_encoding", { request: { sessionId, encoding: normalized } });
+      }
+      updateOpenTerminalPaneTextEncoding(tabId, pane.id, normalized);
+      setActionsMenuOpen(false);
+      focusTerminalRenderer();
+    } catch (error) {
+      showStatusBarNotice(error instanceof Error ? error.message : String(error), { tone: "error" });
+    }
   }
 
   async function handleToggleRecording() {
@@ -3345,6 +3363,31 @@ function TerminalPaneView({
                     >
                       {t("terminal.resetSize")}
                     </button>
+                  </div>
+                </div>
+                <div className="terminal-menu-submenu">
+                  <button className="terminal-menu-item" role="menuitem" type="button">
+                    <FileText size={13} />
+                    {t("terminal.textEncoding")}
+                    <ChevronRight size={13} className="terminal-menu-chevron" />
+                  </button>
+                  <div className="terminal-menu terminal-menu-submenu-panel" role="menu">
+                    {TERMINAL_ENCODING_OPTIONS.map((option) => {
+                      const selected = normalizeTerminalEncoding(pane.textEncoding) === option.value;
+                      return (
+                        <button
+                          aria-checked={selected}
+                          className="terminal-menu-item"
+                          key={option.value}
+                          onClick={() => void handleTextEncodingChange(option.value)}
+                          role="menuitemradio"
+                          type="button"
+                        >
+                          {option.label}
+                          {selected ? <Check size={13} className="terminal-color-scheme-check" /> : null}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

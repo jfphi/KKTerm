@@ -2103,6 +2103,14 @@ fn resize_terminal(
 }
 
 #[tauri::command]
+fn set_terminal_encoding(
+    sessions: tauri::State<'_, sessions::SessionManager>,
+    request: sessions::SetTerminalEncodingRequest,
+) -> Result<(), String> {
+    sessions.set_terminal_encoding(request)
+}
+
+#[tauri::command]
 fn close_terminal_session(
     app: tauri::AppHandle,
     sessions: tauri::State<'_, sessions::SessionManager>,
@@ -3889,6 +3897,7 @@ pub fn run() {
             local_shell_available,
             write_terminal_input,
             resize_terminal,
+            set_terminal_encoding,
             close_terminal_session,
             start_terminal_recording,
             stop_terminal_recording,

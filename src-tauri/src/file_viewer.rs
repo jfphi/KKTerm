@@ -262,8 +262,7 @@ fn decode_text(buffer: &[u8], label: Option<&str>) -> (String, String) {
         .filter(|name| !name.eq_ignore_ascii_case("auto"))
         .and_then(|name| encoding_rs::Encoding::for_label(name.as_bytes()));
     let encoding = requested.unwrap_or_else(|| {
-        let mut detector =
-            chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Allow);
+        let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Allow);
         detector.feed(buffer, true);
         detector.guess(None, chardetng::Utf8Detection::Allow)
     });

@@ -1866,9 +1866,7 @@ async fn advertise_local_clipboard_text(
     let cliprdr = active_stage
         .get_svc_processor_mut::<CliprdrClient>()
         .ok_or_else(|| "RDP clipboard channel is not available".to_string())?;
-    if let Some(backend) =
-        cliprdr.downcast_backend_mut::<CanvasCliprdrBackend<tauri::Wry>>()
-    {
+    if let Some(backend) = cliprdr.downcast_backend_mut::<CanvasCliprdrBackend<tauri::Wry>>() {
         backend.local_text = Some(text);
         backend.paste_after_format_list = paste_after_format_list;
         backend.pending_remote_paste_chord = false;
@@ -1900,9 +1898,7 @@ async fn flush_pending_remote_paste_chord(
 
     let should_paste = active_stage
         .get_svc_processor_mut::<CliprdrClient>()
-        .and_then(|cliprdr| {
-            cliprdr.downcast_backend_mut::<CanvasCliprdrBackend<tauri::Wry>>()
-        })
+        .and_then(|cliprdr| cliprdr.downcast_backend_mut::<CanvasCliprdrBackend<tauri::Wry>>())
         .map(|backend| std::mem::take(&mut backend.pending_remote_paste_chord))
         .unwrap_or(false);
     if !should_paste {

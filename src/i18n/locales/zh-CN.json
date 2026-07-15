@@ -2775,6 +2775,7 @@
     "noRecordings": "此 Connection 没有录制。",
     "recordingMetadata": "{{metadata}}",
     "font": "字体",
+    "textEncoding": "文本编码",
     "increaseSize": "放大",
     "decreaseSize": "缩小",
     "resetSize": "重置大小",

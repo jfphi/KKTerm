@@ -2775,6 +2775,7 @@
     "noRecordings": "Aucun enregistrement pour cette connexion.",
     "recordingMetadata": "{{metadata}}",
     "font": "Police",
+    "textEncoding": "Encodage du texte",
     "increaseSize": "Augmenter la taille",
     "decreaseSize": "Diminuer la taille",
     "resetSize": "Réinitialiser la taille",
