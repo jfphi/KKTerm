@@ -13,6 +13,9 @@ test("rack elevations expose cabinet and toolbar flip icons", async () => {
   ]);
 
   assert.match(elevation, /className="rk-cabinet-flip"/);
+  assert.match(elevation, /const allCabinetItems = rack\.items\.filter/);
+  assert.match(elevation, /for \(const item of allCabinetItems\)/);
+  assert.match(elevation, /allCabinetItems\.length > 0/);
   assert.match(elevation, /data-face=\{displayFace\}/);
   assert.match(elevation, /face-turning/);
   assert.match(sites, /allRackFacesLabel/);
@@ -24,9 +27,22 @@ test("rack elevations expose cabinet and toolbar flip icons", async () => {
   assert.doesNotMatch(sites, /rack-face-global-control/);
   assert.match(sites, /setAllElevationFaces/);
   assert.match(css, /@keyframes rkFaceTurn/);
+  assert.match(css, /\.rk-cabinet-flip \{[\s\S]*bottom: calc\(100% \+ 5px\)/);
+  assert.match(css, /\.rk\.has-face-toggle \.rk-cabinet \{[\s\S]*margin-top: max/);
   assert.match(css, /\.rk\[data-face="rear"\]/);
   assert.match(bag, /data-face=\{face\}/);
   assert.match(bag, /face === "rear"/);
+  for (const rearArtworkPart of [
+    "kk-rear-mini-pack",
+    "kk-rear-hand",
+    "kk-rear-kk-mark",
+    "kk-rear-song",
+    "kk-rear-nutrition",
+    "kk-rear-barcode",
+  ]) {
+    assert.match(bag, new RegExp(rearArtworkPart));
+  }
+  assert.doesNotMatch(bag, /kk-rear-mascot/);
 });
 
 test("Rack View and 2.5D render independent front and rear faces", async () => {
@@ -40,6 +56,12 @@ test("Rack View and 2.5D render independent front and rear faces", async () => {
   assert.match(stage, /faces\.map/);
   assert.match(stage, /face === "front"\s*\?\s*"left"\s*:\s*"right"/);
   assert.match(stage, /spreadBalloonLane/);
+  assert.match(stage, /showRackTop\s+reserveTopU/);
+  assert.match(stage, /item\.kind === "kuaiguai"[\s\S]*faces\.length === 1 \|\| face === "front"/);
+  assert.match(stage, /rack\.items\.filter\(\(item\) => item\.kind !== "kuaiguai"\)/);
+  assert.match(stage, /metadata\?\.vendor\?\.trim\(\)/);
+  assert.match(stage, /metadata\?\.notes\?\.trim\(\)/);
+  assert.match(stage, /className="rk-balloon-notes"/);
   assert.match(iso, /<IsoRackSkin rack=\{rack\} axis="[xy]" face="front"/);
   assert.match(iso, /<IsoRackSkin rack=\{rack\} axis="[xy]" face="rear"/);
   assert.match(iso, /rm-iso-front-marker/);

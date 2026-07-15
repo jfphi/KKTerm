@@ -260,16 +260,20 @@ export function RackElevation({
   // Top-to-bottom U numbers: heightU … 1.
   const unitNumbers = Array.from({ length: rack.heightU }, (_, i) => rack.heightU - i);
 
-  // Status tallies for the header pills (passive items default to online).
+  // Status tallies describe the whole cabinet, independent of which mounting
+  // face is currently visible. Rack-top packages are not cabinet devices.
   let online = 0;
   let warning = 0;
   let offline = 0;
+  const allCabinetItems = rack.items.filter(
+    (item) => !isRackTopItem(item, rack.heightU),
+  );
   const visibleItems = rack.items.filter(
     (item) =>
       (showRackTop && isRackTopItem(item, rack.heightU)) ||
       (!isRackTopItem(item, rack.heightU) && (item.mountFace ?? "front") === displayFace),
   );
-  for (const item of visibleItems.filter((entry) => !isRackTopItem(entry, rack.heightU))) {
+  for (const item of allCabinetItems) {
     const s = itemStatus(item);
     if (s === "warning") warning += 1;
     else if (s === "offline") offline += 1;
@@ -299,7 +303,7 @@ export function RackElevation({
 
   return (
     <div
-      className={`rk${detailed ? " rk-detailed" : ""}${topClearanceU > 0 ? " has-top-item" : ""}${turning ? " face-turning" : ""}`}
+      className={`rk${detailed ? " rk-detailed" : ""}${topClearanceU > 0 ? " has-top-item" : ""}${onToggleFace ? " has-face-toggle" : ""}${turning ? " face-turning" : ""}`}
       data-shell={cabShell}
       data-face={displayFace}
       data-rack-id={rack.id}
@@ -322,7 +326,7 @@ export function RackElevation({
               : ""}
           </span>
         </div>
-        {cabinetItems.length > 0 ? (
+        {allCabinetItems.length > 0 ? (
           <div className="rk-pills">
             <span className="rk-pill on" title={t("itops.racks.status.online")}>
               <span className="dot" />

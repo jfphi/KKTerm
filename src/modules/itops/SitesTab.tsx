@@ -1742,8 +1742,11 @@ function RackDrill({
 
   async function handleElevationContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     if (event.defaultPrevented) return;
+    // An armed placement owns right-click as Cancel. Let its document-level
+    // handler consume the event instead of opening the background picker.
+    if (placeDevice) return;
     const target = event.target as HTMLElement;
-    if (target.closest("[data-rack-id]")) return;
+    if (target.closest("[data-rack-id], .rm-picker")) return;
     event.preventDefault();
     await showNativeContextMenu(
       [
@@ -2190,11 +2193,13 @@ function RackDrill({
               ) : null}
             </div>
           ) : (
-            <div className="rk-room-layout">
+            <div
+              className="rk-room-layout"
+              onContextMenu={handleElevationContextMenu}
+            >
               <div
                 className="rk-elevations"
                 ref={roomElevationsRef}
-                onContextMenu={handleElevationContextMenu}
               >
                 {groupRacksByGroup(serverRoom.racks).map((g) => (
                   <div className="rk-group" key={g.key}>

@@ -169,7 +169,13 @@ export function RackStage({
       ? ["rear"]
       : ["front"];
   const facesKey = faces.join(",");
-  const randomCallouts = selectRandomRackCallouts(rack.items, rack.id, 2);
+  // Kuai Kuai already owns one face-neutral elevation balloon. Excluding it
+  // here prevents its notes from creating a second, random bottom callout.
+  const randomCallouts = selectRandomRackCallouts(
+    rack.items.filter((item) => item.kind !== "kuaiguai"),
+    rack.id,
+    2,
+  );
 
   // Rack View is the only elevation that adapts its U height to the current
   // drill viewport. Other rack previews keep their normal fixed-size skin.
@@ -235,8 +241,9 @@ export function RackStage({
   }, [facesKey, rack.id, rack.heightU, rack.items.length]);
 
   // A single elevation alternates callouts on both sides. With two elevations,
-  // each mounting face owns its outer lane: Front left, Rear right. Nothing
-  // crosses the breathing room between the cabinets.
+  // each mounting face owns its outer lane: Front left, Rear right. The
+  // face-neutral rack-top package is drawn on both elevations but contributes
+  // only one Front-lane callout, so it never masquerades as two devices.
   const balloons: Balloon[] = [];
   for (const face of faces) {
     const geom = geometry[face];
@@ -290,7 +297,7 @@ export function RackStage({
               face={face}
               unitPx={unitPx}
               hideHeader
-              showRackTop={faces.length === 1 || face === "front"}
+              showRackTop
               reserveTopU={KUAIGUAI_TOP_CLEARANCE_U}
               hostFor={hostFor}
               isGhost={isGhost}
@@ -323,6 +330,8 @@ export function RackStage({
         if (!geom) return null;
         const status = isGhost?.(b.item) ? "offline" : itemStatus(b.item);
         const spec = specOf(b.item, t);
+        const model = b.item.metadata?.vendor?.trim() || null;
+        const notes = b.item.metadata?.notes?.trim() || null;
         const sub = hostFor?.(b.item);
         const boundHost = b.item.metadata?.hostId
           ? hosts?.find((entry) => entry.id === b.item.metadata?.hostId)
@@ -343,10 +352,16 @@ export function RackStage({
               <span className="rk-balloon-nm">
                 {b.item.label || t(`itops.racks.kind.${b.item.kind}`)}
               </span>
-              {sub || spec ? (
+              {model || sub || spec ? (
                 <span className="rk-balloon-meta">
+                  {model ? <span className="model">{model}</span> : null}
                   {sub ? <span className="host">{sub}</span> : null}
                   {spec ? <span className="spec">{spec}</span> : null}
+                </span>
+              ) : null}
+              {notes ? (
+                <span className="rk-balloon-notes" title={notes}>
+                  {notes}
                 </span>
               ) : null}
               {boundHost ? (
