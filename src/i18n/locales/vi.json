@@ -2814,6 +2814,7 @@
     "recordingsSummarize": "Summarize",
     "recordingsSummarizing": "Summarizing…",
     "recordingsGenerateSummary": "Generate summary",
+    "recordingsRegenerateSummary": "Regenerate summary using current AI language",
     "recordingsSummaryReady": "Recording summary ready.",
     "recordingsSummariesReady": "{{count}} recording summaries ready.",
     "recordingsSummaryFailed": "Could not summarize recording: {{message}}",

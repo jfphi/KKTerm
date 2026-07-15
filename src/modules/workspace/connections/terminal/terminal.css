@@ -1925,9 +1925,63 @@
 
 .terminal-recordings-summary-cell {
   align-items: flex-start;
+  flex: 1 1 auto;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.terminal-recordings-summary-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.terminal-recordings-summary-regenerate {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.42;
+  transition: color 120ms ease, background 120ms ease, opacity 120ms ease, transform 60ms ease;
+}
+
+.terminal-recordings-summary-content:hover .terminal-recordings-summary-regenerate,
+.terminal-recordings-summary-regenerate:focus-visible {
+  opacity: 1;
+}
+
+.terminal-recordings-summary-regenerate:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.terminal-recordings-summary-regenerate:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.terminal-recordings-summary-regenerate:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.terminal-recordings-summary-regenerate:disabled {
+  cursor: default;
+}
+
+.terminal-recordings-summary-regenerate.busy svg {
+  animation: terminal-recordings-spin 0.8s linear infinite;
 }
 
 .terminal-recordings-summary-cell:hover:not(.ready),

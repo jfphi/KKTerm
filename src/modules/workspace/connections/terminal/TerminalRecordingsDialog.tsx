@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import i18next from "../../../../i18n/config";
+import { resolveAssistantOutputLanguage } from "../../../../ai/assistantComposer";
 import { Actions, Btn, DIcon, DialogShell, Select, Sheet, TextInput } from "../../../../app/ui/dialog";
 import {
   invokeCommand,
@@ -70,6 +70,7 @@ function TerminalRecordingsDialogContent({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const aiProviderSettings = useWorkspaceStore((state) => state.aiProviderSettings);
   const showStatusBarNotice = useWorkspaceStore((state) => state.showStatusBarNotice);
   const [rows, setRows] = useState<TerminalRecordingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -261,8 +262,8 @@ function TerminalRecordingsDialogContent({
     }
   }
 
-  async function summarize(row: TerminalRecordingRow, quiet = false) {
-    if (row.aiSummary) {
+  async function summarize(row: TerminalRecordingRow, quiet = false, force = false) {
+    if (row.aiSummary && !force) {
       return true;
     }
     if (summaryBusy.has(row.id)) {
@@ -281,7 +282,7 @@ function TerminalRecordingsDialogContent({
             "This request is a read-only terminal-log summary. Do not call tools and do not propose commands.",
           activeConnectionId: row.connectionId,
           messages: [],
-          outputLanguage: i18next.resolvedLanguage ?? i18next.language,
+          outputLanguage: resolveAssistantOutputLanguage(aiProviderSettings.outputLanguage),
           allowTools: false,
         },
       });
@@ -628,20 +629,44 @@ function TerminalRecordingsDialogContent({
                           <span className="terminal-recordings-number">{formatByteCount(row.sizeBytes)}</span>
                         </div>
                         <div className="terminal-recordings-cell terminal-recordings-summary-column" role="cell">
-                          <button
-                            className={`terminal-recordings-summary-cell${row.aiSummary ? " ready" : ""}`}
-                            disabled={busy}
-                            onClick={row.aiSummary ? undefined : () => void summarize(row)}
-                            title={row.aiSummary ?? t("terminal.recordingsGenerateSummary")}
-                            type="button"
-                          >
-                            <DIcon name={busy ? "refresh" : "wand"} size={14} />
-                            <span>
-                              {busy
-                                ? t("terminal.recordingsSummarizing")
-                                : row.aiSummary ?? t("terminal.recordingsGenerateSummary")}
-                            </span>
-                          </button>
+                          <div className="terminal-recordings-summary-content">
+                            {row.aiSummary ? (
+                              <>
+                                <div
+                                  className="terminal-recordings-summary-cell ready"
+                                  title={row.aiSummary}
+                                >
+                                  <DIcon name="wand" size={14} />
+                                  <span>{row.aiSummary}</span>
+                                </div>
+                                <button
+                                  aria-label={t("terminal.recordingsRegenerateSummary")}
+                                  className={`terminal-recordings-summary-regenerate${busy ? " busy" : ""}`}
+                                  disabled={busy}
+                                  onClick={() => void summarize(row, false, true)}
+                                  title={t("terminal.recordingsRegenerateSummary")}
+                                  type="button"
+                                >
+                                  <DIcon name="refresh" size={13} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                className="terminal-recordings-summary-cell"
+                                disabled={busy}
+                                onClick={() => void summarize(row)}
+                                title={t("terminal.recordingsGenerateSummary")}
+                                type="button"
+                              >
+                                <DIcon name={busy ? "refresh" : "wand"} size={14} />
+                                <span>
+                                  {busy
+                                    ? t("terminal.recordingsSummarizing")
+                                    : t("terminal.recordingsGenerateSummary")}
+                                </span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
