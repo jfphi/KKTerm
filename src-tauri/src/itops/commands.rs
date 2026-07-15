@@ -445,10 +445,7 @@ pub fn itops_set_rack_placements(
 /// Persist quarter-turn facings for a batch of racks (Server Room View rotate
 /// controls).
 #[tauri::command]
-pub fn itops_set_rack_facings(
-    app: AppHandle,
-    entries: Vec<RackFacingEntry>,
-) -> Result<(), String> {
+pub fn itops_set_rack_facings(app: AppHandle, entries: Vec<RackFacingEntry>) -> Result<(), String> {
     storage(&app).with_connection_infallible(|conn| {
         topo::set_rack_facings(conn, &entries).map_err(|error| error.to_string())
     })
@@ -793,8 +790,7 @@ pub async fn itops_scan_hosts(
     let wanted: Vec<SiteHost> = if host_ids.is_empty() {
         all
     } else {
-        let ids: std::collections::HashSet<&str> =
-            host_ids.iter().map(String::as_str).collect();
+        let ids: std::collections::HashSet<&str> = host_ids.iter().map(String::as_str).collect();
         all.into_iter()
             .filter(|host| ids.contains(host.id.as_str()))
             .collect()

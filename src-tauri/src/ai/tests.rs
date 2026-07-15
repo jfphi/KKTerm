@@ -18,10 +18,8 @@ fn playbook_ai_decision_accepts_closed_json_and_rejects_unknown_actions() {
     assert_eq!(decision.reason, "service is active");
 
     assert!(
-        parse_playbook_ai_decision(
-            "{\"decision\":\"runCommand\",\"reason\":\"sudo rm -rf /\"}"
-        )
-        .is_err()
+        parse_playbook_ai_decision("{\"decision\":\"runCommand\",\"reason\":\"sudo rm -rf /\"}")
+            .is_err()
     );
 }
 
@@ -436,11 +434,11 @@ fn claude_auth_status_requires_logged_in_json() {
     assert!(claude_auth_status_logged_in(
         "{\n  \"loggedIn\": true,\n  \"authMethod\": \"claude.ai\"\n}"
     ));
-    assert!(!claude_auth_status_logged_in(
-        "{\n  \"loggedIn\": false\n}"
-    ));
+    assert!(!claude_auth_status_logged_in("{\n  \"loggedIn\": false\n}"));
     // Unknown output shapes degrade to the old exit-code-only behavior.
-    assert!(claude_auth_status_logged_in("Logged in as user@example.com"));
+    assert!(claude_auth_status_logged_in(
+        "Logged in as user@example.com"
+    ));
     assert!(claude_auth_status_logged_in("{\"status\":\"ok\"}"));
 }
 
@@ -523,7 +521,10 @@ fn windows_external_terminal_command_line_wraps_quoted_command() {
     #[cfg(target_os = "windows")]
     assert_eq!(
         command,
-        format!("{} auth login", shell_quote("C:\\nvm4w\\nodejs\\claude.cmd"))
+        format!(
+            "{} auth login",
+            shell_quote("C:\\nvm4w\\nodejs\\claude.cmd")
+        )
     );
 
     let line = windows_external_terminal_command_line(command);
@@ -3712,19 +3713,23 @@ fn assistant_task_update_cannot_reassign_an_existing_sudo_secret() {
     };
 
     assert!(
-        validate_assistant_task(&task, Some(&BatchTask::Playbook {
-            name: "maintenance".to_string(),
-            steps: vec![PlaybookStep {
-                id: Some("step-1".to_string()),
-                kind: PlaybookStepKind::Sudo,
-                name: "original privileged command".to_string(),
-                send: "sudo systemctl restart example".to_string(),
-                expect: None,
-                timeout_seconds: None,
-                secret_owner_id: Some("secret-existing".to_string()),
-                ai_instruction: None,
-            }],
-        })).is_err(),
+        validate_assistant_task(
+            &task,
+            Some(&BatchTask::Playbook {
+                name: "maintenance".to_string(),
+                steps: vec![PlaybookStep {
+                    id: Some("step-1".to_string()),
+                    kind: PlaybookStepKind::Sudo,
+                    name: "original privileged command".to_string(),
+                    send: "sudo systemctl restart example".to_string(),
+                    expect: None,
+                    timeout_seconds: None,
+                    secret_owner_id: Some("secret-existing".to_string()),
+                    ai_instruction: None,
+                }],
+            })
+        )
+        .is_err(),
         "an existing secret owner id must not authorize a modified sudo step"
     );
 }
@@ -4013,15 +4018,15 @@ fn format_copilot_sdk_error_maps_json_failure_to_cli_update_guidance() {
         "expected an update command, got: {message}"
     );
     // The underlying detail stays available for bug reports.
-    assert!(message.contains("1782380691690"), "expected detail, got: {message}");
+    assert!(
+        message.contains("1782380691690"),
+        "expected detail, got: {message}"
+    );
 }
 
 #[test]
 fn format_copilot_sdk_error_keeps_stage_context_for_other_failures() {
-    let error = CopilotSdkError::with_message(
-        CopilotSdkErrorKind::InvalidConfig,
-        "bad config",
-    );
+    let error = CopilotSdkError::with_message(CopilotSdkErrorKind::InvalidConfig, "bad config");
     let message = format_copilot_sdk_error("create session", error);
 
     assert!(

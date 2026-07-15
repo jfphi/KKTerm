@@ -82,6 +82,7 @@ export function syncChildConnectionsFromTabs(
 
     const cwd = pane.cwd.trim();
     const fontSize = pane.fontSize;
+    const textEncoding = pane.textEncoding;
     const terminalOpacity = pane.connection?.terminalOpacity;
     const terminalBackground =
       "terminalBackground" in pane && pane.terminalBackground !== undefined
@@ -89,10 +90,11 @@ export function syncChildConnectionsFromTabs(
         : pane.connection?.terminalBackground;
     const cwdChanged = Boolean(cwd) && child.cwd !== cwd;
     const fontSizeChanged = child.fontSize !== fontSize;
+    const textEncodingChanged = child.textEncoding !== textEncoding;
     const opacityChanged = child.terminalOpacity !== terminalOpacity;
     const backgroundChanged = !backgroundsEqual(child.terminalBackground, terminalBackground);
 
-    if (!cwdChanged && !fontSizeChanged && !opacityChanged && !backgroundChanged) {
+    if (!cwdChanged && !fontSizeChanged && !textEncodingChanged && !opacityChanged && !backgroundChanged) {
       return child;
     }
 
@@ -101,6 +103,7 @@ export function syncChildConnectionsFromTabs(
       ...child,
       cwd: cwdChanged ? cwd : child.cwd,
       fontSize,
+      textEncoding,
       terminalOpacity,
       terminalBackground,
     };

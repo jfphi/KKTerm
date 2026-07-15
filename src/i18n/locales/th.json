@@ -2776,6 +2776,7 @@
     "noRecordings": "ไม่มีรายการบันทึกสำหรับ Connection นี้",
     "recordingMetadata": "{{metadata}}",
     "font": "แบบอักษร",
+    "textEncoding": "การเข้ารหัสข้อความ",
     "increaseSize": "เพิ่มขนาด",
     "decreaseSize": "ลดขนาด",
     "resetSize": "รีเซ็ตขนาด",

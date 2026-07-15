@@ -24,10 +24,10 @@ use tauri::AppHandle;
 
 #[cfg(any(windows, unix))]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-#[cfg(target_os = "windows")]
-use tokio::net::windows::named_pipe::ServerOptions;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+#[cfg(target_os = "windows")]
+use tokio::net::windows::named_pipe::ServerOptions;
 
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const SERVER_NAME: &str = "kkterm-cli";
@@ -200,7 +200,9 @@ pub fn start_if_enabled(
     {
         let _ = (app, allow_all_dangerous);
         crate::logging::mcp_debug("bridge.unsupported_platform", &json!({}));
-        eprintln!("kkterm built-in MCP server: transport is unsupported on this platform; bridge disabled.");
+        eprintln!(
+            "kkterm built-in MCP server: transport is unsupported on this platform; bridge disabled."
+        );
     }
 }
 
