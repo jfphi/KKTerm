@@ -2230,7 +2230,7 @@ function TerminalPaneView({
               sshOldProtocols: resolveSshOldProtocols(connection, sshSettings),
             },
           });
-          await confirmTrustedSshHostKey(preview);
+          await confirmTrustedSshHostKey(preview, sshSettings);
         }
 
         const terminalStartAt = performance.now();
@@ -2319,6 +2319,27 @@ function TerminalPaneView({
           });
         }
         sessionIdRef.current = result.sessionId;
+        if (terminalSettings.autoRecordSessions) {
+          // Register recording before startup scripts can produce output.
+          setRecordingBusy(true);
+          try {
+            await startTerminalRecording(result.sessionId, connection);
+          } catch (error) {
+            if (!disposed) {
+              showStatusBarNotice(
+                t("terminal.recordingFailed", { message: error instanceof Error ? error.message : String(error) }),
+                { tone: "error" },
+              );
+            }
+          } finally {
+            if (!disposed) {
+              setRecordingBusy(false);
+            }
+          }
+          if (disposed) {
+            return;
+          }
+        }
         if (connection.type === "ssh") {
           updateOpenTerminalPaneX11ForwardingStatus(
             tabId,
@@ -2731,6 +2752,12 @@ function TerminalPaneView({
     event.stopPropagation();
     onFocus();
 
+    // PuTTY-style right-click paste; Shift+right-click keeps the menu reachable.
+    if (terminalSettings.rightClickPaste && !event.shiftKey) {
+      void handlePasteIntoTerminal();
+      return;
+    }
+
     const selection = terminalRendererRef.current?.getSelection() ?? "";
     setSelectedTerminalText(selection);
     setContextMenu({
@@ -2738,6 +2765,19 @@ function TerminalPaneView({
       y: event.clientY,
       hasSelection: Boolean(selection),
     });
+  }
+
+  async function startTerminalRecording(sessionId: string, connection: Connection) {
+    const started = await invokeCommand("start_terminal_recording", {
+      request: {
+        sessionId,
+        connectionId: connection.id,
+        connectionName: connection.name,
+        initialBuffer: terminalRendererRef.current?.getBufferText() ?? "",
+      },
+    });
+    setRecordingInfo(started);
+    showStatusBarNotice(t("terminal.recordingStarted"));
   }
 
   async function handleToggleRecording() {
@@ -2759,16 +2799,7 @@ function TerminalPaneView({
         return;
       }
 
-      const started = await invokeCommand("start_terminal_recording", {
-        request: {
-          sessionId,
-          connectionId: connection.id,
-          connectionName: connection.name,
-          initialBuffer: terminalRendererRef.current?.getBufferText() ?? "",
-        },
-      });
-      setRecordingInfo(started);
-      showStatusBarNotice(t("terminal.recordingStarted"));
+      await startTerminalRecording(sessionId, connection);
     } catch (error) {
       showStatusBarNotice(
         t("terminal.recordingFailed", { message: error instanceof Error ? error.message : String(error) }),
