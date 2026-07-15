@@ -4,6 +4,59 @@ import type { Connection } from "../../../../types";
 export type RecordingDateRange = "all" | "today" | "7d";
 export type RecordingSortKey = "name" | "host" | "date" | "duration" | "size";
 export type RecordingSort = { key: RecordingSortKey; direction: "asc" | "desc" };
+export type TerminalRecordingColumnKey =
+  | "name"
+  | "host"
+  | "date"
+  | "time"
+  | "duration"
+  | "size"
+  | "summary";
+export type TerminalRecordingColumnWidths = Record<TerminalRecordingColumnKey, number>;
+
+export const DEFAULT_TERMINAL_RECORDING_COLUMN_WIDTHS: TerminalRecordingColumnWidths = {
+  name: 280,
+  host: 140,
+  date: 112,
+  time: 92,
+  duration: 92,
+  size: 84,
+  summary: 340,
+};
+
+const MIN_TERMINAL_RECORDING_COLUMN_WIDTHS: TerminalRecordingColumnWidths = {
+  name: 180,
+  host: 90,
+  date: 88,
+  time: 76,
+  duration: 78,
+  size: 68,
+  summary: 180,
+};
+
+export function resizeTerminalRecordingColumn(
+  widths: TerminalRecordingColumnWidths,
+  key: TerminalRecordingColumnKey,
+  nextWidth: number,
+): TerminalRecordingColumnWidths {
+  return {
+    ...widths,
+    [key]: Math.max(MIN_TERMINAL_RECORDING_COLUMN_WIDTHS[key], Math.round(nextWidth)),
+  };
+}
+
+export function terminalRecordingGridTemplate(widths: TerminalRecordingColumnWidths) {
+  return [
+    "36px",
+    `${widths.name}px`,
+    `${widths.host}px`,
+    `${widths.date}px`,
+    `${widths.time}px`,
+    `${widths.duration}px`,
+    `${widths.size}px`,
+    `${widths.summary}px`,
+  ].join(" ");
+}
 
 export interface TerminalRecordingRow extends TerminalRecordingEntry {
   id: string;
@@ -92,7 +145,7 @@ export function filterAndSortTerminalRecordings(options: {
   });
   const direction = options.sort.direction === "asc" ? 1 : -1;
   return filtered.sort((left, right) => {
-    let comparison = 0;
+    let comparison: number;
     switch (options.sort.key) {
       case "name":
         comparison = left.fileName.localeCompare(right.fileName);
@@ -129,11 +182,11 @@ export function buildTerminalRecordingsExportName(rows: TerminalRecordingRow[]) 
 }
 
 export function normalizeRecordingPath(path: string) {
-  return path.replaceAll("\\", "/").toLocaleLowerCase();
+  return path.replace(/\\/g, "/").toLocaleLowerCase();
 }
 
 function humanizeRecordingFolderLabel(label: string) {
-  const value = label.trim().replaceAll("-", " ").replace(/\s+/g, " ");
+  const value = label.trim().replace(/-/g, " ").replace(/\s+/g, " ");
   return value || "Connection";
 }
 

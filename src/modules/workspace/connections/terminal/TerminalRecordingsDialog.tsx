@@ -1,4 +1,13 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import i18next from "../../../../i18n/config";
 import { Actions, Btn, DIcon, DialogShell, Select, Sheet, TextInput } from "../../../../app/ui/dialog";
@@ -10,14 +19,19 @@ import {
 import { useWorkspaceStore } from "../../../../store";
 import { flattenConnections } from "../treeUtils";
 import {
+  DEFAULT_TERMINAL_RECORDING_COLUMN_WIDTHS,
   buildTerminalRecordingsExportName,
   filterAndSortTerminalRecordings,
   normalizeRecordingPath,
   recordingHostLabel,
+  resizeTerminalRecordingColumn,
   resolveTerminalRecordingRows,
+  terminalRecordingGridTemplate,
   type RecordingDateRange,
   type RecordingSort,
   type RecordingSortKey,
+  type TerminalRecordingColumnKey,
+  type TerminalRecordingColumnWidths,
   type TerminalRecordingRow,
 } from "./terminalRecordingsModel";
 
@@ -57,7 +71,9 @@ function TerminalRecordingsDialogContent({
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [summaryBusy, setSummaryBusy] = useState<Set<string>>(new Set());
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [columnWidths, setColumnWidths] = useState<TerminalRecordingColumnWidths>(
+    DEFAULT_TERMINAL_RECORDING_COLUMN_WIDTHS,
+  );
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -163,6 +179,13 @@ function TerminalRecordingsDialogContent({
   const totalSize = rows.reduce((sum, row) => sum + row.sizeBytes, 0);
   const selectedSize = selectedRows.reduce((sum, row) => sum + row.sizeBytes, 0);
   const batchSummarizing = summaryBusy.size > 0;
+  const gridStyle = useMemo(
+    () =>
+      ({
+        "--terminal-recordings-columns": terminalRecordingGridTemplate(columnWidths),
+      }) as CSSProperties,
+    [columnWidths],
+  );
 
   function toggleSort(key: RecordingSortKey) {
     setSort((current) => ({
@@ -207,14 +230,12 @@ function TerminalRecordingsDialogContent({
 
   async function summarize(row: TerminalRecordingRow, quiet = false) {
     if (row.aiSummary) {
-      setExpanded((current) => toggleSetValue(current, row.id));
       return true;
     }
     if (summaryBusy.has(row.id)) {
       return false;
     }
     setSummaryBusy((current) => new Set(current).add(row.id));
-    setExpanded((current) => new Set(current).add(row.id));
     try {
       const input = await invokeCommand("prepare_terminal_recording_summary", { path: row.path });
       const response = await invokeCommand("run_ai_agent", {
@@ -366,7 +387,6 @@ function TerminalRecordingsDialogContent({
             }
           />
         }
-        height={680}
         onClose={onClose}
         rule
         sub={t("terminal.recordingsCount", {
@@ -374,7 +394,6 @@ function TerminalRecordingsDialogContent({
           size: formatByteCount(totalSize),
         })}
         title={t("terminal.recordingsTitle")}
-        width={980}
       >
         <div className="terminal-recordings-toolbar">
           <label className={`terminal-recordings-search${searching ? " searching" : ""}`}>
@@ -416,20 +435,73 @@ function TerminalRecordingsDialogContent({
           </button>
         </div>
 
-        <div className="terminal-recordings-grid" role="table">
+        <div className="terminal-recordings-grid" role="table" style={gridStyle}>
           <div className="terminal-recordings-grid-head" role="row">
-            <RecordingCheckbox
-              checked={allVisibleSelected}
-              label={t("terminal.recordingsSelectAll")}
-              onClick={toggleAllVisible}
-            />
-            <SortHeader label={t("terminal.recordingsName")} name="name" onSort={toggleSort} sort={sort} />
-            <SortHeader label={t("terminal.recordingsHost")} name="host" onSort={toggleSort} sort={sort} />
-            <SortHeader label={t("terminal.recordingsDate")} name="date" onSort={toggleSort} sort={sort} />
-            <span>{t("terminal.recordingsTime")}</span>
-            <SortHeader label={t("terminal.recordingsDuration")} name="duration" onSort={toggleSort} sort={sort} />
-            <SortHeader label={t("terminal.recordingsSize")} name="size" onSort={toggleSort} sort={sort} />
-            <span>{t("terminal.recordingsAiSummary")}</span>
+            <div className="terminal-recordings-header-cell terminal-recordings-select-cell" role="columnheader">
+              <RecordingCheckbox
+                checked={allVisibleSelected}
+                label={t("terminal.recordingsSelectAll")}
+                onClick={toggleAllVisible}
+              />
+            </div>
+            <RecordingHeaderCell
+              column="name"
+              label={t("terminal.recordingsName")}
+              onResize={setColumnWidths}
+              width={columnWidths.name}
+            >
+              <SortHeader label={t("terminal.recordingsName")} name="name" onSort={toggleSort} sort={sort} />
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              column="host"
+              label={t("terminal.recordingsHost")}
+              onResize={setColumnWidths}
+              width={columnWidths.host}
+            >
+              <SortHeader label={t("terminal.recordingsHost")} name="host" onSort={toggleSort} sort={sort} />
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              column="date"
+              label={t("terminal.recordingsDate")}
+              onResize={setColumnWidths}
+              width={columnWidths.date}
+            >
+              <SortHeader label={t("terminal.recordingsDate")} name="date" onSort={toggleSort} sort={sort} />
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              column="time"
+              label={t("terminal.recordingsTime")}
+              onResize={setColumnWidths}
+              width={columnWidths.time}
+            >
+              <span>{t("terminal.recordingsTime")}</span>
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              align="end"
+              column="duration"
+              label={t("terminal.recordingsDuration")}
+              onResize={setColumnWidths}
+              width={columnWidths.duration}
+            >
+              <SortHeader label={t("terminal.recordingsDuration")} name="duration" onSort={toggleSort} sort={sort} />
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              align="end"
+              column="size"
+              label={t("terminal.recordingsSize")}
+              onResize={setColumnWidths}
+              width={columnWidths.size}
+            >
+              <SortHeader label={t("terminal.recordingsSize")} name="size" onSort={toggleSort} sort={sort} />
+            </RecordingHeaderCell>
+            <RecordingHeaderCell
+              column="summary"
+              label={t("terminal.recordingsAiSummary")}
+              onResize={setColumnWidths}
+              width={columnWidths.summary}
+            >
+              <span>{t("terminal.recordingsAiSummary")}</span>
+            </RecordingHeaderCell>
           </div>
           <div className="terminal-recordings-grid-body">
             {loading ? <RecordingSkeletonRows /> : null}
@@ -438,7 +510,7 @@ function TerminalRecordingsDialogContent({
                 <DIcon name="terminal" size={24} />
                 <span>
                   {rows.length === 0
-                    ? t("terminal.noRecordings")
+                    ? t("terminal.recordingsEmpty")
                     : t("terminal.recordingsNoMatch")}
                 </span>
               </div>
@@ -446,76 +518,66 @@ function TerminalRecordingsDialogContent({
             {!loading
               ? visibleRows.map((row) => {
                   const busy = summaryBusy.has(row.id);
-                  const showSummary = expanded.has(row.id) && (busy || row.aiSummary);
                   return (
                     <div className="terminal-recordings-entry" key={row.id}>
                       <div
                         className={`terminal-recordings-grid-row${selected.has(row.id) ? " selected" : ""}`}
                         role="row"
                       >
-                        <RecordingCheckbox
-                          checked={selected.has(row.id)}
-                          label={t("terminal.recordingsSelectOne", { name: row.fileName })}
-                          onClick={() => toggleSelected(row)}
-                        />
-                        <button
-                          className="terminal-recordings-name"
-                          onClick={() => openRecording(row)}
-                          title={t("terminal.recordingsOpenBuiltInEditor", { name: row.fileName })}
-                          type="button"
-                        >
-                          <DIcon name="terminal" size={14} />
-                          <span>{row.fileName}</span>
-                        </button>
-                        <span className="terminal-recordings-host" title={row.connectionName}>
-                          {row.host}
-                        </span>
-                        <span>{formatDate(row.timestampMillis)}</span>
-                        <span className="terminal-recordings-mono">{formatTime(row.timestampMillis)}</span>
-                        <span className="terminal-recordings-number">
-                          {formatDuration(row.durationMillis)}
-                        </span>
-                        <span className="terminal-recordings-number">{formatByteCount(row.sizeBytes)}</span>
-                        <button
-                          className={`terminal-recordings-summary-cell${row.aiSummary ? " ready" : ""}`}
-                          disabled={busy}
-                          onClick={() => void summarize(row)}
-                          title={
-                            row.aiSummary
-                              ? t("terminal.recordingsToggleSummary")
-                              : t("terminal.recordingsGenerateSummary")
-                          }
-                          type="button"
-                        >
-                          <DIcon name={busy ? "refresh" : "wand"} size={14} />
-                          <span>
-                            {busy
-                              ? t("terminal.recordingsSummarizing")
-                              : row.aiSummary ?? t("terminal.recordingsGenerateSummary")}
-                          </span>
-                        </button>
-                      </div>
-                      {showSummary ? (
-                        <div className="terminal-recordings-summary-detail">
-                          <strong>
-                            <DIcon name="wand" size={12} />
-                            {t("terminal.recordingsAiSummary")}
-                          </strong>
-                          {busy ? (
-                            <span className="terminal-recordings-summary-loading">
-                              {t("terminal.recordingsSummaryLoading")}
-                            </span>
-                          ) : (
-                            <>
-                              <p>{row.aiSummary}</p>
-                              {row.aiSummaryPreview ? (
-                                <code>$ {row.aiSummaryPreview}</code>
-                              ) : null}
-                              {row.aiSummaryModel ? <small>{row.aiSummaryModel}</small> : null}
-                            </>
-                          )}
+                        <div className="terminal-recordings-cell terminal-recordings-select-cell" role="cell">
+                          <RecordingCheckbox
+                            checked={selected.has(row.id)}
+                            label={t("terminal.recordingsSelectOne", { name: row.fileName })}
+                            onClick={() => toggleSelected(row)}
+                          />
                         </div>
-                      ) : null}
+                        <div className="terminal-recordings-cell" role="cell">
+                          <button
+                            className="terminal-recordings-name"
+                            onClick={() => openRecording(row)}
+                            title={t("terminal.recordingsOpenBuiltInEditor", { name: row.fileName })}
+                            type="button"
+                          >
+                            <DIcon name="terminal" size={14} />
+                            <span>{row.fileName}</span>
+                          </button>
+                        </div>
+                        <div className="terminal-recordings-cell" role="cell">
+                          <span className="terminal-recordings-host" title={row.connectionName}>
+                            {row.host}
+                          </span>
+                        </div>
+                        <div className="terminal-recordings-cell" role="cell">
+                          <span>{formatDate(row.timestampMillis)}</span>
+                        </div>
+                        <div className="terminal-recordings-cell" role="cell">
+                          <span className="terminal-recordings-mono">{formatTime(row.timestampMillis)}</span>
+                        </div>
+                        <div className="terminal-recordings-cell terminal-recordings-cell-end" role="cell">
+                          <span className="terminal-recordings-number">
+                            {formatDuration(row.durationMillis)}
+                          </span>
+                        </div>
+                        <div className="terminal-recordings-cell terminal-recordings-cell-end" role="cell">
+                          <span className="terminal-recordings-number">{formatByteCount(row.sizeBytes)}</span>
+                        </div>
+                        <div className="terminal-recordings-cell terminal-recordings-summary-column" role="cell">
+                          <button
+                            className={`terminal-recordings-summary-cell${row.aiSummary ? " ready" : ""}`}
+                            disabled={busy}
+                            onClick={row.aiSummary ? undefined : () => void summarize(row)}
+                            title={row.aiSummary ?? t("terminal.recordingsGenerateSummary")}
+                            type="button"
+                          >
+                            <DIcon name={busy ? "refresh" : "wand"} size={14} />
+                            <span>
+                              {busy
+                                ? t("terminal.recordingsSummarizing")
+                                : row.aiSummary ?? t("terminal.recordingsGenerateSummary")}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })
@@ -524,6 +586,89 @@ function TerminalRecordingsDialogContent({
         </div>
       </Sheet>
     </DialogShell>
+  );
+}
+
+function RecordingHeaderCell({
+  align,
+  children,
+  column,
+  label,
+  onResize,
+  width,
+}: {
+  align?: "end";
+  children: ReactNode;
+  column: TerminalRecordingColumnKey;
+  label: string;
+  onResize: (
+    update: (current: TerminalRecordingColumnWidths) => TerminalRecordingColumnWidths,
+  ) => void;
+  width: number;
+}) {
+  const [dragStart, setDragStart] = useState<{
+    pointerId: number;
+    startWidth: number;
+    startX: number;
+  }>();
+
+  function resizeTo(nextWidth: number) {
+    onResize((current) => resizeTerminalRecordingColumn(current, column, nextWidth));
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragStart({
+      pointerId: event.pointerId,
+      startWidth: width,
+      startX: event.clientX,
+    });
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLSpanElement>) {
+    if (!dragStart || dragStart.pointerId !== event.pointerId) {
+      return;
+    }
+    resizeTo(dragStart.startWidth + event.clientX - dragStart.startX);
+  }
+
+  function finishPointerResize(event: ReactPointerEvent<HTMLSpanElement>) {
+    if (dragStart?.pointerId === event.pointerId) {
+      setDragStart(undefined);
+    }
+  }
+
+  function handleResizeKey(event: KeyboardEvent<HTMLSpanElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const step = event.shiftKey ? 40 : 12;
+    resizeTo(width + (event.key === "ArrowRight" ? step : -step));
+  }
+
+  return (
+    <div
+      className={`terminal-recordings-header-cell${align === "end" ? " align-end" : ""}`}
+      role="columnheader"
+    >
+      {children}
+      <span
+        aria-label={label}
+        aria-orientation="vertical"
+        aria-valuenow={width}
+        className={`terminal-recordings-column-resizer${dragStart ? " dragging" : ""}`}
+        onKeyDown={handleResizeKey}
+        onPointerCancel={finishPointerResize}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointerResize}
+        role="separator"
+        tabIndex={0}
+      />
+    </div>
   );
 }
 
@@ -574,6 +719,10 @@ function RecordingSkeletonRows() {
     <div aria-hidden="true" className="terminal-recordings-skeletons">
       {Array.from({ length: 8 }, (_, index) => (
         <div className="terminal-recordings-skeleton" key={index}>
+          <span />
+          <span />
+          <span />
+          <span />
           <span />
           <span />
           <span />

@@ -4628,6 +4628,92 @@ mod tests {
     }
 
     #[test]
+    fn universal_recording_index_search_summary_cache_and_export_share_safe_paths() {
+        let root = temp_recording_root("browser");
+        let manager = TerminalRecordingManager::new_for_root(root.clone());
+        let started = manager
+            .start_recording(StartTerminalRecordingRequest {
+                session_id: "session-browser".to_string(),
+                connection_id: "conn-1234567890abcdef".to_string(),
+                connection_name: "Prod East".to_string(),
+                initial_buffer: "$ sudo systemctl restart nginx\n".to_string(),
+            })
+            .expect("recording starts");
+        for index in 0..500 {
+            manager
+                .record_output(
+                    "session-browser",
+                    &format!(
+                        "line {index}\n{}",
+                        if index == 410 {
+                            "ERROR upstream timed out\n"
+                        } else {
+                            ""
+                        }
+                    ),
+                )
+                .expect("recording output appends");
+        }
+        manager
+            .stop_recording("session-browser".to_string())
+            .expect("recording stops");
+
+        let indexed = list_all_terminal_recordings(root.clone()).expect("universal index loads");
+        assert_eq!(indexed.len(), 1);
+        assert_eq!(indexed[0].connection_id_fragment, "conn-12345678");
+        assert_eq!(indexed[0].connection_folder_label, "prod-east");
+        assert!(indexed[0].started_at_millis.is_some());
+
+        let matches = search_terminal_recordings(root.clone(), "upstream timed out")
+            .expect("command-based search succeeds");
+        assert_eq!(matches.len(), 1);
+
+        let summary_input = prepare_terminal_recording_summary(
+            root.clone(),
+            started.path.to_string_lossy().as_ref(),
+        )
+        .expect("summary input is prepared");
+        assert_eq!(summary_input.total_lines, 502);
+        assert!(summary_input.sample.len() <= 24 * 1024);
+        assert!(summary_input.sample.contains("systemctl restart nginx"));
+        assert!(summary_input.sample.contains("ERROR upstream timed out"));
+
+        save_terminal_recording_summary(
+            root.clone(),
+            SaveTerminalRecordingSummaryRequest {
+                path: started.path.to_string_lossy().to_string(),
+                summary: "Restarted nginx; a later upstream timeout remained visible.".to_string(),
+                preview: summary_input.preview,
+                provider_kind: "openai".to_string(),
+                model: "test-model".to_string(),
+            },
+        )
+        .expect("summary cache saves");
+        let cached = list_all_terminal_recordings(root.clone()).expect("cached index loads");
+        assert_eq!(
+            cached[0].ai_summary.as_deref(),
+            Some("Restarted nginx; a later upstream timeout remained visible.")
+        );
+        assert_eq!(cached[0].ai_summary_model.as_deref(), Some("test-model"));
+
+        let destination = root.join("export.zip");
+        let exported = export_terminal_recordings(
+            root.clone(),
+            ExportTerminalRecordingsRequest {
+                paths: vec![started.path.to_string_lossy().to_string()],
+                destination: destination.to_string_lossy().to_string(),
+            },
+        )
+        .expect("recording archive exports");
+        assert_eq!(exported.count, 1);
+        let file = File::open(&destination).expect("archive opens");
+        let archive = zip::ZipArchive::new(file).expect("archive is valid");
+        assert_eq!(archive.len(), 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn session_manager_rejects_recording_after_session_closes() {
         let root = temp_recording_root("closed-session");
         let manager = SessionManager::new();
