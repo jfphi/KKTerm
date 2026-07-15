@@ -3676,12 +3676,78 @@ fn prompt_permission_mode_blocks_mutating_tools() {
     assert!(!tool_requires_allow_all("performance_counters"));
     assert!(!tool_requires_allow_all("tutorial_highlight"));
     assert!(!tool_requires_allow_all("assistant_use_skill"));
+    assert!(tool_requires_allow_all("itops_create_site"));
+    assert!(tool_requires_allow_all("itops_create_task"));
+    assert!(tool_requires_allow_all("itops_create_automation"));
+    assert!(tool_requires_allow_all("itops_start_batch_run"));
+    assert!(!tool_requires_allow_all("itops_list_sites"));
+    assert!(!tool_requires_allow_all("itops_list_run_history"));
+    assert!(!tool_requires_allow_all("itops_get_task"));
+    assert!(!tool_requires_allow_all("itops_get_run_report"));
+    assert!(!tool_requires_allow_all("itops_test_automation"));
 
     let result = tool_permission_required_result("dashboard_reset");
     let value: Value = serde_json::from_str(&result).expect("permission result is JSON");
     assert_eq!(value["ok"], false);
     assert_eq!(value["error"], "permissionRequired");
     assert_eq!(value["permissionMode"], "prompt");
+}
+
+#[test]
+fn assistant_task_update_cannot_reassign_an_existing_sudo_secret() {
+    use crate::itops::types::{BatchTask, PlaybookStep, PlaybookStepKind};
+
+    let task = BatchTask::Playbook {
+        name: "maintenance".to_string(),
+        steps: vec![PlaybookStep {
+            id: Some("step-2".to_string()),
+            kind: PlaybookStepKind::Sudo,
+            name: "replace privileged command".to_string(),
+            send: "sudo rm -rf /tmp/example".to_string(),
+            expect: None,
+            timeout_seconds: None,
+            secret_owner_id: Some("secret-existing".to_string()),
+            ai_instruction: None,
+        }],
+    };
+
+    assert!(
+        validate_assistant_task(&task, Some(&BatchTask::Playbook {
+            name: "maintenance".to_string(),
+            steps: vec![PlaybookStep {
+                id: Some("step-1".to_string()),
+                kind: PlaybookStepKind::Sudo,
+                name: "original privileged command".to_string(),
+                send: "sudo systemctl restart example".to_string(),
+                expect: None,
+                timeout_seconds: None,
+                secret_owner_id: Some("secret-existing".to_string()),
+                ai_instruction: None,
+            }],
+        })).is_err(),
+        "an existing secret owner id must not authorize a modified sudo step"
+    );
+}
+
+#[test]
+fn assistant_task_update_can_preserve_an_unchanged_sudo_step() {
+    use crate::itops::types::{BatchTask, PlaybookStep, PlaybookStepKind};
+
+    let task = BatchTask::Playbook {
+        name: "maintenance".to_string(),
+        steps: vec![PlaybookStep {
+            id: Some("step-1".to_string()),
+            kind: PlaybookStepKind::Sudo,
+            name: "restart service".to_string(),
+            send: "sudo systemctl restart example".to_string(),
+            expect: None,
+            timeout_seconds: None,
+            secret_owner_id: Some("secret-existing".to_string()),
+            ai_instruction: None,
+        }],
+    };
+
+    assert!(validate_assistant_task(&task, Some(&task)).is_ok());
 }
 
 #[test]
