@@ -368,6 +368,14 @@ pub fn delete_server_room(conn: &SqliteConnection, id: &str) -> Result<()> {
         "DELETE FROM itops_room_objects WHERE site_id = ? AND server_room = ?",
         params![site_id, name],
     )?;
+    // Drop the room's racks too (their items cascade via the FK). The Rack
+    // View delete flow removes racks itself before this call; the assistant /
+    // MCP path relies on this so a deleted room cannot leave orphaned racks
+    // whose name tag resurrects a ghost room grouping.
+    conn.execute(
+        "DELETE FROM itops_site_racks WHERE site_id = ? AND server_room = ?",
+        params![site_id, name],
+    )?;
     conn.execute("DELETE FROM itops_server_rooms WHERE id = ?", params![id])?;
     Ok(())
 }
