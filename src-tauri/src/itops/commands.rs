@@ -453,6 +453,9 @@ pub fn itops_duplicate_rack(
     height_u: u32,
     depth_mm: u32,
     power_capacity_w: Option<u32>,
+    grid_x: Option<i64>,
+    grid_y: Option<i64>,
+    facing: Option<i64>,
 ) -> Result<Rack, String> {
     storage(&app).with_connection_infallible(|conn| {
         topo::duplicate_rack(
@@ -465,6 +468,9 @@ pub fn itops_duplicate_rack(
             height_u,
             depth_mm,
             power_capacity_w,
+            grid_x,
+            grid_y,
+            facing,
             new_itops_id,
         )
         .map_err(|error| error.to_string())

@@ -167,9 +167,24 @@ test("Server Room and Rack rows expose deep Duplicate commands", async () => {
   assert.match(sites, /duplicateOf=\{rackDialog\.duplicateOf\}/);
   assert.match(sites, /duplicateOf=\{serverRoomDialog\.duplicateOf\}/);
   assert.match(state, /invokeCommand\("itops_duplicate_server_room", \{/);
-  assert.match(state, /invokeCommand\("itops_duplicate_rack", \{ id, \.\.\.input \}\)/);
+  assert.match(state, /invokeCommand\("itops_duplicate_rack", \{[\s\S]*id,[\s\S]*\.\.\.input,[\s\S]*\.\.\.placement/);
   assert.match(tauri, /itops_duplicate_server_room:/);
   assert.match(tauri, /itops_duplicate_rack:/);
+});
+
+test("Server Room spatial views arm Shift-click deep copies for one-click blank placement", async () => {
+  const sites = await read("src/modules/itops/SitesTab.tsx");
+  const floor = await read("src/modules/itops/ServerRoomFloorPlan.tsx");
+  const iso = await read("src/modules/itops/ServerRoomIsoView.tsx");
+
+  assert.match(sites, /name: nextTopologyDuplicateName\(/);
+  assert.match(sites, /duplicateRackForPlacement\([\s\S]*gridX: cell\.x, gridY: cell\.y, facing: draft\.facing/);
+  assert.match(floor, /event\.shiftKey && onCloneRack/);
+  assert.match(floor, /event\.shiftKey && onCloneObject/);
+  assert.match(floor, /roomCellIsBlank\(cell, layout\.cells, objects\)/);
+  assert.match(iso, /event\.shiftKey && onCloneRack/);
+  assert.match(iso, /event\.shiftKey && onCloneObject/);
+  assert.match(iso, /cloneRack != null \|\| cloneObject != null[\s\S]*placeCloneAt\(cell\)/);
 });
 
 test("Server Rooms virtual row exposes its contextual add command", async () => {

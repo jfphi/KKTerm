@@ -66,6 +66,8 @@ import {
   objectSpec,
   rackTopSupport,
   resolveDropZ,
+  roomCellIsBlank,
+  roomObjectPlacementIsBlank,
   wallArms,
   wallOccupiesCell,
   type RoomObject,
@@ -148,8 +150,15 @@ export function ServerRoomIsoView({
   floorColor = "default",
   tool = null,
   placeRackId = null,
+  cloneRack = null,
+  cloneRackFacing = 0,
+  cloneObject = null,
   onRackPlaced,
   onObjectPlaced,
+  onCloneRack,
+  onCloneObject,
+  onCloneRackPlaced,
+  onCloneObjectPlaced,
   placement,
   onPlacementChange,
   facing,
@@ -171,9 +180,17 @@ export function ServerRoomIsoView({
   tool?: RoomTool;
   /** A just-created rack awaiting its position/facing clicks. */
   placeRackId?: string | null;
+  /** Shift-click copy drafts are temporary until their one-click placement. */
+  cloneRack?: Rack | null;
+  cloneRackFacing?: Facing;
+  cloneObject?: RoomObject | null;
   onRackPlaced?: () => void;
   /** A room fixture was successfully placed; the owner may keep continuous tools armed. */
   onObjectPlaced?: () => void;
+  onCloneRack?: (rack: Rack) => void;
+  onCloneObject?: (object: RoomObject) => void;
+  onCloneRackPlaced?: (cell: IsoCell) => void;
+  onCloneObjectPlaced?: (cell: IsoCell) => void;
   placement: FreePlacementMap;
   onPlacementChange?: (next: FreePlacementMap) => void;
   facing: RackFacingMap;
@@ -209,7 +226,8 @@ export function ServerRoomIsoView({
   useEffect(() => saveRoomZoom("iso", zoom), [zoom]);
   useWheelZoom(scrollRef, (dir) => setZoom((current) => stepRoomZoom(current, dir)));
   useRoomPan(scrollRef);
-  const armed = tool != null || placeRackId != null;
+  const armed =
+    tool != null || placeRackId != null || cloneRack != null || cloneObject != null;
   const placing = !!editMode && armed;
   // Cursor-tracked placement preview: hovering a tile (or a cabinet) while a
   // picker card is armed snaps the armed object's ghost to that grid cell.
@@ -232,7 +250,10 @@ export function ServerRoomIsoView({
       setPendingFacing(null);
     }
   }, [placing]);
-  useEffect(() => setPendingFacing(null), [placeRackId, tool]);
+  useEffect(
+    () => setPendingFacing(null),
+    [placeRackId, tool, cloneRack?.id, cloneObject?.id],
+  );
   const setHoverCell = (cell: IsoCell, corner: Corner = 0) => {
     if (pendingFacing) return;
     setHover((prev) =>
@@ -368,7 +389,7 @@ export function ServerRoomIsoView({
     id: string,
     origin: IsoCell,
   ) {
-    if (!editMode || armed) return;
+    if (!editMode || armed || event.shiftKey) return;
     // Left button only — the middle button pans the viewport (useRoomPan).
     if (event.button !== 0) return;
     if (kind === "rack" && !onPlacementChange) return;
@@ -532,6 +553,37 @@ export function ServerRoomIsoView({
     setHover({ ...cell, corner });
   }
 
+  function placeCloneAt(cell: IsoCell) {
+    if (cloneRack != null) {
+      if (!roomCellIsBlank(cell, layout.cells, objects)) {
+        onObjectBlocked?.();
+        return;
+      }
+      setHover(null);
+      onCloneRackPlaced?.(cell);
+      return;
+    }
+    if (cloneObject != null) {
+      const span = objectCellSpan(cloneObject.kind, cloneObject.rot);
+      if (
+        cell.x + span.w > floorCols ||
+        cell.y + span.h > floorRows ||
+        !roomObjectPlacementIsBlank(
+          cell,
+          cloneObject.kind,
+          cloneObject.rot,
+          layout.cells,
+          objects,
+        )
+      ) {
+        onObjectBlocked?.();
+        return;
+      }
+      setHover(null);
+      onCloneObjectPlaced?.(cell);
+    }
+  }
+
   // Drop the picker's just-created rack on a cell (swapping with another Rack,
   // but never entering a Wall's reserved block).
   function placeRackAt(cell: IsoCell, event: { clientX: number; clientY: number }) {
@@ -560,6 +612,15 @@ export function ServerRoomIsoView({
       suppressClickRef.current = false;
       return;
     }
+    if (editMode && event.shiftKey && onCloneRack) {
+      event.stopPropagation();
+      onCloneRack(rack);
+      return;
+    }
+    if (cloneRack != null || cloneObject != null) {
+      onObjectBlocked?.();
+      return;
+    }
     if (placeRackId != null) {
       placeRackAt(layout.cells[rack.id], event);
       return;
@@ -575,12 +636,21 @@ export function ServerRoomIsoView({
     onSelectRack(rack.id);
   }
 
-  function selectObject(id: string) {
+  function selectObject(object: RoomObject, event: ReactMouseEvent<HTMLDivElement>) {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
     }
-    if (editMode && !armed) setSelectedItem({ kind: "object", id });
+    if (editMode && event.shiftKey && onCloneObject) {
+      event.stopPropagation();
+      onCloneObject(object);
+      return;
+    }
+    if (cloneRack != null || cloneObject != null) {
+      onObjectBlocked?.();
+      return;
+    }
+    if (editMode && !armed) setSelectedItem({ kind: "object", id: object.id });
   }
 
   function handleRoomPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -701,7 +771,11 @@ export function ServerRoomIsoView({
                       className="rm-iso-tile"
                       style={{ left: at.x * CELL, top: at.y * CELL, width: CELL, height: CELL }}
                       title={
-                        placeRackId != null
+                        cloneRack != null
+                          ? cloneRack.name
+                          : cloneObject != null
+                            ? t(`itops.floorPlan.object.${cloneObject.kind}`)
+                            : placeRackId != null
                           ? t("itops.floorPlan.pickerRack")
                           : tool != null
                             ? t(`itops.floorPlan.object.${tool}`)
@@ -718,7 +792,9 @@ export function ServerRoomIsoView({
                           : undefined
                       }
                       onClick={(event) =>
-                        placeRackId != null
+                        cloneRack != null || cloneObject != null
+                          ? placeCloneAt(cell)
+                          : placeRackId != null
                           ? placeRackAt(cell, event)
                           : tool != null
                             ? placeObjectAt(cell, cornerFromTileEvent(event), event)
@@ -803,7 +879,7 @@ export function ServerRoomIsoView({
                     onPointerMove={moveDrag}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
-                    onSelect={() => selectObject(object.id)}
+                    onSelect={(event) => selectObject(object, event)}
                     onRotate={() => rotateObject(object)}
                     onCorner={
                       objectSpec(object.kind).quarter ? () => cycleCorner(object) : undefined
@@ -828,22 +904,41 @@ export function ServerRoomIsoView({
                       // has no free vertical span), or the complete cabinet
                       // model for the pending rack at its depth, front flush.
                       const preview = pendingFacing ?? {
-                        kind: tool != null ? "object" as const : "rack" as const,
+                        kind: tool != null || cloneObject != null ? "object" as const : "rack" as const,
                         cell: hover!,
-                        corner: hover!.corner,
-                        facing: 0 as Facing,
+                        corner: cloneObject?.corner ?? hover!.corner,
+                        facing: cloneObject?.rot ?? cloneRackFacing,
                       };
                       const previewFacing = preview.facing;
-                      if (tool != null) {
+                      const previewObjectKind = cloneObject?.kind ?? tool;
+                      if (previewObjectKind != null) {
                         const previewCorner = preview.kind === "object" ? preview.corner : (0 as Corner);
-                        const { z } = resolveObjectPlacement(
-                          preview.cell,
-                          previewCorner,
-                          previewFacing,
-                        );
+                        const z = cloneObject != null
+                          ? roomObjectPlacementIsBlank(
+                              preview.cell,
+                              cloneObject.kind,
+                              cloneObject.rot,
+                              layout.cells,
+                              objects,
+                            )
+                            ? cloneObject.z
+                            : null
+                          : resolveObjectPlacement(
+                              preview.cell,
+                              previewCorner,
+                              previewFacing,
+                            ).z;
                         const displayFacing = rotateFacingForView(previewFacing, angle);
-                        const fp = objectFootprint(tool, previewFacing, previewCorner);
-                        const anchor = objectSurfaceAnchor(tool, previewFacing, previewCorner);
+                        const fp = objectFootprint(
+                          previewObjectKind,
+                          previewFacing,
+                          previewCorner,
+                        );
+                        const anchor = objectSurfaceAnchor(
+                          previewObjectKind,
+                          previewFacing,
+                          previewCorner,
+                        );
                         const displayRect = rotateRectForView(
                           { x: preview.cell.x + offX + fp.x, y: preview.cell.y + offY + fp.y, w: fp.w, d: fp.d },
                           angle,
@@ -872,35 +967,42 @@ export function ServerRoomIsoView({
                               {pendingFacing ? (
                                 <RoomPlacementFacingArrow
                                   facing={displayFacing}
-                                  liftPx={z == null ? 8 : zPx(z + objectSpec(tool).heightU) + 8}
+                                  liftPx={
+                                    z == null
+                                      ? 8
+                                      : zPx(z + objectSpec(previewObjectKind).heightU) + 8
+                                  }
                                 />
                               ) : null}
                             </div>
                             {z != null ? (
                               <div
                                 className={`rm-iso-obj ghost${z === 0 ? " grounded" : ""}`}
-                                data-kind={tool}
+                                data-kind={previewObjectKind}
                                 style={
                                   {
                                     left: displayRect.x * CELL,
                                     top: displayRect.y * CELL,
                                     width: displayRect.w * CELL,
                                     height: displayRect.d * CELL,
-                                    "--obj": OBJECT_ACCENTS[tool],
-                                    "--tile": OBJECT_ACCENTS[tool],
+                                    "--obj": OBJECT_ACCENTS[previewObjectKind],
+                                    "--tile": OBJECT_ACCENTS[previewObjectKind],
                                   } as React.CSSProperties
                                 }
                               >
                                 <span
                                   className="rm-iso-obj-model"
-                                  data-kind={tool}
+                                  data-kind={previewObjectKind}
                                   style={{
                                     left: (displayAnchor.x - displayRect.x) * CELL,
                                     top: (displayAnchor.y - displayRect.y) * CELL,
                                     transform: surfaceModel(zPx(z), "-50%, -100%"),
                                   }}
                                 >
-                                  <RoomObjectIsoArtwork kind={tool} facing={displayFacing} />
+                                  <RoomObjectIsoArtwork
+                                    kind={previewObjectKind}
+                                    facing={displayFacing}
+                                  />
                                 </span>
                               </div>
                             ) : null}
@@ -908,10 +1010,13 @@ export function ServerRoomIsoView({
                         );
                       }
                       const at = toDisplay(preview.cell);
-                      const pendingRack = racks.find((entry) => entry.id === placeRackId);
+                      const pendingRack =
+                        cloneRack ?? racks.find((entry) => entry.id === placeRackId);
                       const gh = cabHeight(pendingRack?.heightU ?? 42);
                       const displayFacing = rotateFacingForView(previewFacing, angle);
-                      const blocked = wallOccupiesCell(preview.cell, objects);
+                      const blocked = cloneRack != null
+                        ? !roomCellIsBlank(preview.cell, layout.cells, objects)
+                        : wallOccupiesCell(preview.cell, objects);
                       const fp = rackFootprint(
                         displayFacing,
                         rackDepthFrac(pendingRack?.depthMm ?? 1000),
@@ -930,7 +1035,7 @@ export function ServerRoomIsoView({
                               height: d,
                             }}
                           >
-                            {pendingFacing ? (
+                            {pendingFacing && cloneRack == null ? (
                               <RoomPlacementFacingArrow facing={displayFacing} liftPx={gh + 8} />
                             ) : null}
                           </div>
@@ -991,8 +1096,8 @@ export function ServerRoomIsoView({
       {editMode ? <div className="rm-iso-hint">{t("itops.floorPlan.isoEditHint")}</div> : null}
       <RoomPlacementCursorGhost
         pointer={placementPointer}
-        tool={tool}
-        rackArmed={placeRackId != null}
+        tool={cloneObject?.kind ?? tool}
+        rackArmed={placeRackId != null || cloneRack != null}
         variant="iso"
         snapped={pendingFacing != null || hover != null}
       />
@@ -1282,7 +1387,7 @@ function IsoObject({
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onSelect: () => void;
+  onSelect: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onRotate: () => void;
   /** Quarter-block fixtures only: walk to the next cell corner. */
   onCorner?: () => void;

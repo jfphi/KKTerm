@@ -147,6 +147,10 @@ type PendingDelete =
   | { kind: "rack"; siteId: string; rack: Rack }
   | { kind: "item"; siteId: string; rack: Rack; item: RackItem };
 
+type RoomCloneDraft =
+  | { kind: "rack"; rack: Rack; name: string; facing: Facing }
+  | { kind: "object"; object: RoomObject };
+
 const FREE_CARD_WIDTH = 240;
 const FREE_CARD_HEIGHT = 74;
 const RACK_SEQUENCE_PENDING_ID = "__rack-sequence-pending__";
@@ -1457,6 +1461,7 @@ function RackDrill({
   const setSiteBackground = useItOpsStore((state) => state.setSiteBackground);
   const createRackForSequence = useItOpsStore((state) => state.createRack);
   const discardRack = useItOpsStore((state) => state.deleteRack);
+  const duplicateRackForPlacement = useItOpsStore((state) => state.duplicateRack);
 
   // Server Room View layout: rack elevations (default), the blueprint floor
   // plan, or the 2.5D room. Persists app-wide.
@@ -1480,6 +1485,8 @@ function RackDrill({
   // object kind, and a just-created rack awaiting its placement click.
   const [roomTool, setRoomTool] = useState<RoomTool>(null);
   const [placeRackId, setPlaceRackId] = useState<string | null>(null);
+  const [roomClone, setRoomClone] = useState<RoomCloneDraft | null>(null);
+  const clonePlacementBusyRef = useRef(false);
   const placeRackIdRef = useRef(placeRackId);
   placeRackIdRef.current = placeRackId;
   const rackSequenceRef = useRef<RackPlacementSequence | null>(null);
@@ -1497,6 +1504,7 @@ function RackDrill({
     rackSequenceRef.current = null;
     setRoomTool(null);
     setPlaceRackId(null);
+    setRoomClone(null);
     if (pendingRackId && pendingRackId !== RACK_SEQUENCE_PENDING_ID) {
       discardPendingRackRef.current(pendingRackId);
     }
@@ -1561,6 +1569,7 @@ function RackDrill({
     rackSequenceRef.current = null;
     setRoomTool(null);
     setPlaceRackId(null);
+    setRoomClone(null);
     setPlaceDevice(null);
     if (pendingRackId && pendingRackId !== RACK_SEQUENCE_PENDING_ID) {
       discardPendingRackRef.current(pendingRackId);
@@ -1761,6 +1770,66 @@ function RackDrill({
 
   function notifyObjectBlocked() {
     showStatusBarNotice(t("itops.floorPlan.objectNoSpace"), { tone: "warning" });
+  }
+
+  function armRoomRackClone(source: Rack) {
+    cancelRoomPlacement();
+    setRoomClone({
+      kind: "rack",
+      rack: source,
+      name: nextTopologyDuplicateName(
+        source.name,
+        (serverRoom?.racks ?? []).map((entry) => entry.name),
+      ),
+      facing: sanitizeFacing(roomFacing[source.id]),
+    });
+  }
+
+  function armRoomObjectClone(source: RoomObject) {
+    cancelRoomPlacement();
+    setRoomClone({ kind: "object", object: { ...source } });
+  }
+
+  function placeRoomRackClone(cell: { x: number; y: number }) {
+    if (roomClone?.kind !== "rack" || clonePlacementBusyRef.current) return;
+    const draft = roomClone;
+    clonePlacementBusyRef.current = true;
+    void duplicateRackForPlacement(
+      site.id,
+      draft.rack.id,
+      {
+        name: draft.name,
+        serverRoom: draft.rack.serverRoom,
+        rackGroup: draft.rack.rackGroup,
+        shell: draft.rack.shell,
+        heightU: draft.rack.heightU,
+        depthMm: draft.rack.depthMm,
+        powerCapacityW: draft.rack.powerCapacityW,
+      },
+      { gridX: cell.x, gridY: cell.y, facing: draft.facing },
+    )
+      .then(() => setRoomClone(null))
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
+      })
+      .finally(() => {
+        clonePlacementBusyRef.current = false;
+      });
+  }
+
+  function placeRoomObjectClone(cell: { x: number; y: number }) {
+    if (roomClone?.kind !== "object") return;
+    saveRoomObjectsState([
+      ...roomObjects,
+      {
+        ...roomClone.object,
+        id: crypto.randomUUID(),
+        x: cell.x,
+        y: cell.y,
+      },
+    ]);
+    setRoomClone(null);
   }
 
   // The background popover serves the Server Room elevation/2.5D views and
@@ -2165,10 +2234,21 @@ function RackDrill({
                   floorColor={sanitizeIsoFloor(serverRoom.room?.floorColor)}
                   tool={roomTool}
                   placeRackId={placeRackId}
+                  cloneRack={
+                    roomClone?.kind === "rack"
+                      ? { ...roomClone.rack, name: roomClone.name }
+                      : null
+                  }
+                  cloneRackFacing={roomClone?.kind === "rack" ? roomClone.facing : 0}
+                  cloneObject={roomClone?.kind === "object" ? roomClone.object : null}
                   onRackPlaced={completeRackPlacement}
                   onObjectPlaced={() => {
                     if (roomTool !== "wall") setRoomTool(null);
                   }}
+                  onCloneRack={armRoomRackClone}
+                  onCloneObject={armRoomObjectClone}
+                  onCloneRackPlaced={placeRoomRackClone}
+                  onCloneObjectPlaced={placeRoomObjectClone}
                   placement={isoPlacements}
                   onPlacementChange={saveIsoPlacements}
                   facing={roomFacing}
@@ -2189,10 +2269,21 @@ function RackDrill({
                   editMode={editMode}
                   tool={roomTool}
                   placeRackId={placeRackId}
+                  cloneRack={
+                    roomClone?.kind === "rack"
+                      ? { ...roomClone.rack, name: roomClone.name }
+                      : null
+                  }
+                  cloneRackFacing={roomClone?.kind === "rack" ? roomClone.facing : 0}
+                  cloneObject={roomClone?.kind === "object" ? roomClone.object : null}
                   onRackPlaced={completeRackPlacement}
                   onObjectPlaced={() => {
                     if (roomTool !== "wall") setRoomTool(null);
                   }}
+                  onCloneRack={armRoomRackClone}
+                  onCloneObject={armRoomObjectClone}
+                  onCloneRackPlaced={placeRoomRackClone}
+                  onCloneObjectPlaced={placeRoomObjectClone}
                   placement={isoPlacements}
                   onPlacementChange={saveIsoPlacements}
                   facing={roomFacing}
@@ -2210,13 +2301,13 @@ function RackDrill({
                 <RoomObjectPicker
                   tool={roomTool}
                   onToolChange={(tool) => {
-                    if (placeRackId != null) cancelRoomPlacement();
+                    if (placeRackId != null || roomClone != null) cancelRoomPlacement();
                     setRoomTool(tool);
                   }}
-                  rackArmed={placeRackId != null}
+                  rackArmed={placeRackId != null || roomClone?.kind === "rack"}
                   onPickRack={() => {
                     setRoomTool(null);
-                    if (placeRackId != null) {
+                    if (placeRackId != null || roomClone != null) {
                       cancelRoomPlacement();
                       return;
                     }

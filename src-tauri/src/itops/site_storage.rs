@@ -975,8 +975,32 @@ pub fn duplicate_rack(
     height_u: u32,
     depth_mm: u32,
     power_capacity_w: Option<u32>,
+    grid_x: Option<i64>,
+    grid_y: Option<i64>,
+    facing: Option<i64>,
     mut new_id: impl FnMut(&str) -> String,
 ) -> Result<Rack> {
+    let placement = match (grid_x, grid_y, facing) {
+        (None, None, None) => None,
+        (Some(x), Some(y), Some(facing)) if x >= 0 && y >= 0 && (0..=3).contains(&facing) => {
+            Some((x, y, facing))
+        }
+        (Some(_), Some(_), Some(facing)) if !(0..=3).contains(&facing) => {
+            return Err(ItopsStorageError::Validation(format!(
+                "rack facing must be 0..=3, got {facing}"
+            )));
+        }
+        (Some(x), Some(y), Some(_)) => {
+            return Err(ItopsStorageError::Validation(format!(
+                "rack grid coordinates must be non-negative, got ({x}, {y})"
+            )));
+        }
+        _ => {
+            return Err(ItopsStorageError::Validation(
+                "rack clone placement requires grid_x, grid_y, and facing together".to_string(),
+            ));
+        }
+    };
     let mut source = fetch_rack(conn, id)?;
     let old_height_u = source.height_u;
     source.name = validate_name(name)?;
@@ -1010,6 +1034,12 @@ pub fn duplicate_rack(
         false,
         &mut new_id,
     )?;
+    if let Some((grid_x, grid_y, facing)) = placement {
+        tx.execute(
+            "UPDATE itops_site_racks SET grid_x = ?, grid_y = ?, facing = ? WHERE id = ?",
+            params![grid_x, grid_y, facing, duplicate_id],
+        )?;
+    }
     tx.commit()?;
     fetch_rack(conn, &duplicate_id)
 }
@@ -1660,6 +1690,9 @@ mod tests {
             42,
             1000,
             Some(8000),
+            None,
+            None,
+            None,
             |prefix| {
                 sequence += 1;
                 format!("{prefix}-copy-{sequence}")
@@ -1684,6 +1717,36 @@ mod tests {
         assert_eq!(duplicated.grid_x, None);
         assert_eq!(duplicated.grid_y, None);
         assert_eq!(duplicated.facing, None);
+    }
+
+    #[test]
+    fn duplicate_rack_can_commit_directly_to_a_grid_cell_with_facing() {
+        let conn = open_test_db();
+        create_rack(
+            &conn, "r1", "f1", "Rack-1", "Room B", "", None, 42, 1000, None,
+        )
+        .unwrap();
+
+        let duplicated = duplicate_rack(
+            &conn,
+            "r1",
+            "Rack-1#2",
+            "Room B",
+            "",
+            None,
+            42,
+            1000,
+            None,
+            Some(5),
+            Some(6),
+            Some(3),
+            |prefix| format!("{prefix}-copy"),
+        )
+        .unwrap();
+
+        assert_eq!(duplicated.grid_x, Some(5));
+        assert_eq!(duplicated.grid_y, Some(6));
+        assert_eq!(duplicated.facing, Some(3));
     }
 
     #[test]

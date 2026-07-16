@@ -97,6 +97,13 @@ export interface RackFacingUpdate {
   facing: number;
 }
 
+export interface RackClonePlacement {
+  gridX: number;
+  gridY: number;
+  /** Quarter turns, 0-3. */
+  facing: number;
+}
+
 export interface PlaceItemInput {
   rackId: string;
   connectionId: string | null;
@@ -292,7 +299,12 @@ interface ItOpsState {
   createRack: (siteId: string, input: RackInput) => Promise<Rack>;
   updateRack: (siteId: string, id: string, input: RackInput) => Promise<void>;
   deleteRack: (siteId: string, id: string) => Promise<void>;
-  duplicateRack: (siteId: string, id: string, input: RackInput) => Promise<Rack>;
+  duplicateRack: (
+    siteId: string,
+    id: string,
+    input: RackInput,
+    placement?: RackClonePlacement,
+  ) => Promise<Rack>;
   /** Persist Server Room View placements durably; updates the cache in place. */
   setRackPlacements: (
     siteId: string,
@@ -552,8 +564,12 @@ export const useItOpsStore = create<ItOpsState>((set, get) => ({
     await get().loadRacks(siteId);
   },
 
-  async duplicateRack(siteId, id, input) {
-    const duplicated = await invokeCommand("itops_duplicate_rack", { id, ...input });
+  async duplicateRack(siteId, id, input, placement) {
+    const duplicated = await invokeCommand("itops_duplicate_rack", {
+      id,
+      ...input,
+      ...placement,
+    });
     await get().loadRacks(siteId);
     return duplicated;
   },

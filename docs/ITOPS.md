@@ -446,6 +446,12 @@ in that Server Room while preserving the configured Rack settings. Right-click,
 Escape, selecting another app control, leaving edit mode, switching layouts, or
 navigating away cancels either continuous tool and deletes only an unplaced
 pending Rack.
+In the floor plan and 2.5D layouts, Shift-clicking an existing Rack or room
+object arms a temporary deep-copy draft instead. The cursor ghost preserves
+the source facing and configuration. One click on a blank floor cell commits
+the copy at that cell; cancellation creates nothing. Rack copies receive the
+next available `#N` name and clone their Rack Devices in the same atomic write
+as the new grid placement and facing.
 Site, Server Room, and Rack tree rows share one native context-menu contract:
 Properties is always the final item, separated from the commands above it.
 Delete sits above Properties and routes to the shared danger `ConfirmSheet`;

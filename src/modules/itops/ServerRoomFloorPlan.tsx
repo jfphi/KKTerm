@@ -33,6 +33,8 @@ import {
   objectSpec,
   rackTopSupport,
   resolveDropZ,
+  roomCellIsBlank,
+  roomObjectPlacementIsBlank,
   wallArms,
   wallOccupiesCell,
   type RoomObject,
@@ -91,8 +93,15 @@ export function ServerRoomFloorPlan({
   editMode,
   tool = null,
   placeRackId = null,
+  cloneRack = null,
+  cloneRackFacing = 0,
+  cloneObject = null,
   onRackPlaced,
   onObjectPlaced,
+  onCloneRack,
+  onCloneObject,
+  onCloneRackPlaced,
+  onCloneObjectPlaced,
   placement,
   onPlacementChange,
   facing,
@@ -111,9 +120,17 @@ export function ServerRoomFloorPlan({
   tool?: RoomTool;
   /** A just-created rack awaiting its position/facing clicks. */
   placeRackId?: string | null;
+  /** Shift-click copy drafts are temporary until their one-click placement. */
+  cloneRack?: Rack | null;
+  cloneRackFacing?: Facing;
+  cloneObject?: RoomObject | null;
   onRackPlaced?: () => void;
   /** A room fixture was successfully placed; the owner may keep continuous tools armed. */
   onObjectPlaced?: () => void;
+  onCloneRack?: (rack: Rack) => void;
+  onCloneObject?: (object: RoomObject) => void;
+  onCloneRackPlaced?: (cell: IsoCell) => void;
+  onCloneObjectPlaced?: (cell: IsoCell) => void;
   placement: FreePlacementMap;
   onPlacementChange?: (next: FreePlacementMap) => void;
   facing: RackFacingMap;
@@ -161,7 +178,8 @@ export function ServerRoomFloorPlan({
   const cellW = floorW > 0 ? Math.max(BP_MIN_CELL, floorW / cols) : BP_CELL;
   const cellH = floorH > 0 ? Math.max(BP_MIN_CELL, floorH / rows) : BP_CELL;
   const grid = { cols, rows, cells: layout.cells };
-  const armed = tool != null || placeRackId != null;
+  const armed =
+    tool != null || placeRackId != null || cloneRack != null || cloneObject != null;
   // Cursor-tracked placement preview: the armed object ghost snaps to the
   // hovered cell (and, for quarter-block fixtures, the cell quadrant under
   // the pointer) so the grid shows the drop before the click commits.
@@ -184,7 +202,10 @@ export function ServerRoomFloorPlan({
       setPendingFacing(null);
     }
   }, [placing]);
-  useEffect(() => setPendingFacing(null), [placeRackId, tool]);
+  useEffect(
+    () => setPendingFacing(null),
+    [placeRackId, tool, cloneRack?.id, cloneObject?.id],
+  );
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<{
     kind: "rack" | "object";
@@ -208,7 +229,7 @@ export function ServerRoomFloorPlan({
     id: string,
     origin: IsoCell,
   ) {
-    if (!editMode || armed) return;
+    if (!editMode || armed || event.shiftKey) return;
     // Left button only — the middle button pans the viewport (useRoomPan).
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -379,6 +400,35 @@ export function ServerRoomFloorPlan({
   function placeAt(event: React.MouseEvent<HTMLDivElement>) {
     if (!editMode || !armed) return;
     const cell = cellFromEvent(event);
+    if (cloneRack != null) {
+      if (!roomCellIsBlank(cell, layout.cells, objects)) {
+        onObjectBlocked?.();
+        return;
+      }
+      setHover(null);
+      onCloneRackPlaced?.(cell);
+      return;
+    }
+    if (cloneObject != null) {
+      const span = objectCellSpan(cloneObject.kind, cloneObject.rot);
+      if (
+        cell.x + span.w > cols ||
+        cell.y + span.h > rows ||
+        !roomObjectPlacementIsBlank(
+          cell,
+          cloneObject.kind,
+          cloneObject.rot,
+          layout.cells,
+          objects,
+        )
+      ) {
+        onObjectBlocked?.();
+        return;
+      }
+      setHover(null);
+      onCloneObjectPlaced?.(cell);
+      return;
+    }
     if (placeRackId != null) {
       if (pendingFacing?.kind === "rack") {
         const nextFacing = facingForPending(event, pendingFacing);
@@ -444,12 +494,28 @@ export function ServerRoomFloorPlan({
     setHover({ ...cell, corner });
   }
 
-  function selectRack(rackId: string) {
+  function selectRack(rack: Rack, event: React.MouseEvent<HTMLButtonElement>) {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
     }
-    if (!armed) onSelectRack(rackId);
+    if (editMode && event.shiftKey && onCloneRack) {
+      event.stopPropagation();
+      onCloneRack(rack);
+      return;
+    }
+    if (!armed) onSelectRack(rack.id);
+  }
+
+  function selectObject(object: RoomObject, event: React.MouseEvent<HTMLDivElement>) {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (editMode && event.shiftKey && onCloneObject) {
+      event.stopPropagation();
+      onCloneObject(object);
+    }
   }
 
   function rotateRack(rack: Rack) {
@@ -553,7 +619,7 @@ export function ServerRoomFloorPlan({
                     })
                   }
                   onInfoLeave={() => setRackHover(null)}
-                  onSelect={() => selectRack(rack.id)}
+                  onSelect={(event) => selectRack(rack, event)}
                   onRotate={editMode && onFacingChange ? () => rotateRack(rack) : undefined}
                   onDelete={editMode && onDeleteRack ? () => onDeleteRack(rack) : undefined}
                 />
@@ -573,6 +639,7 @@ export function ServerRoomFloorPlan({
                   onPointerMove={moveDrag}
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}
+                  onSelect={(event) => selectObject(object, event)}
                   onRotate={() => rotateObject(object)}
                   onCorner={
                     objectSpec(object.kind).quarter ? () => cycleCorner(object) : undefined
@@ -589,24 +656,36 @@ export function ServerRoomFloorPlan({
               {placing && (pendingFacing ?? hover)
                 ? (() => {
                     const preview = pendingFacing ?? {
-                      kind: tool != null ? "object" as const : "rack" as const,
+                      kind: tool != null || cloneObject != null ? "object" as const : "rack" as const,
                       cell: hover!,
-                      corner: hover!.corner,
-                      facing: 0 as Facing,
+                      corner: cloneObject?.corner ?? hover!.corner,
+                      facing: cloneObject?.rot ?? cloneRackFacing,
                     };
                     const previewCorner = preview.kind === "object" ? preview.corner : (0 as Corner);
                     const previewFacing = preview.facing;
-                    const spec = tool != null ? objectSpec(tool) : null;
-                    const blocked = placeRackId != null
-                      ? wallOccupiesCell(preview.cell, objects)
-                      : tool != null && resolveObjectPlacement(
+                    const previewObjectKind = cloneObject?.kind ?? tool;
+                    const spec = previewObjectKind != null ? objectSpec(previewObjectKind) : null;
+                    const blocked = cloneRack != null
+                      ? !roomCellIsBlank(preview.cell, layout.cells, objects)
+                      : cloneObject != null
+                        ? !roomObjectPlacementIsBlank(
+                            preview.cell,
+                            cloneObject.kind,
+                            cloneObject.rot,
+                            layout.cells,
+                            objects,
+                          )
+                        : placeRackId != null
+                          ? wallOccupiesCell(preview.cell, objects)
+                          : tool != null && resolveObjectPlacement(
                           preview.cell,
                           previewCorner,
                           previewFacing,
                         ).z == null;
-                    const pendingRack = racks.find((entry) => entry.id === placeRackId);
-                    const fp = tool != null
-                      ? objectFootprint(tool, previewFacing, previewCorner)
+                    const pendingRack =
+                      cloneRack ?? racks.find((entry) => entry.id === placeRackId);
+                    const fp = previewObjectKind != null
+                      ? objectFootprint(previewObjectKind, previewFacing, previewCorner)
                       : rackFootprint(
                           previewFacing,
                           rackDepthFrac(pendingRack?.depthMm ?? 1000),
@@ -623,11 +702,14 @@ export function ServerRoomFloorPlan({
                         style={
                           {
                             ...slot,
-                            "--obj": tool != null ? OBJECT_ACCENTS[tool] : undefined,
+                            "--obj":
+                              previewObjectKind != null
+                                ? OBJECT_ACCENTS[previewObjectKind]
+                                : undefined,
                           } as React.CSSProperties
                         }
                       >
-                        {tool != null && spec ? (
+                        {previewObjectKind != null && spec ? (
                           <span
                             className="rm-bp-ghost-item"
                             style={{
@@ -636,7 +718,7 @@ export function ServerRoomFloorPlan({
                               transform: `rotate(${previewFacing * 90}deg)`,
                             }}
                           >
-                            <RoomObjectPlanArtwork kind={tool} />
+                            <RoomObjectPlanArtwork kind={previewObjectKind} />
                           </span>
                         ) : (
                           <span
@@ -647,7 +729,7 @@ export function ServerRoomFloorPlan({
                             }}
                           />
                         )}
-                        {pendingFacing ? (
+                        {pendingFacing && cloneRack == null && cloneObject == null ? (
                           <RoomPlacementFacingArrow facing={previewFacing} />
                         ) : null}
                       </div>
@@ -669,8 +751,8 @@ export function ServerRoomFloorPlan({
       {editMode ? <div className="rm-iso-hint">{t("itops.floorPlan.blueprintEditHint")}</div> : null}
       <RoomPlacementCursorGhost
         pointer={placementPointer}
-        tool={tool}
-        rackArmed={placeRackId != null}
+        tool={cloneObject?.kind ?? tool}
+        rackArmed={placeRackId != null || cloneRack != null}
         variant="floor"
         snapped={pendingFacing != null || hover != null}
       />
@@ -709,7 +791,7 @@ function BlueprintRack({
   onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onInfoHover: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onInfoLeave: () => void;
-  onSelect: () => void;
+  onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onRotate?: () => void;
   onDelete?: () => void;
 }) {
@@ -818,6 +900,7 @@ function BlueprintObject({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
+  onSelect,
   onRotate,
   onCorner,
   onRaise,
@@ -835,6 +918,7 @@ function BlueprintObject({
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onSelect: (event: React.MouseEvent<HTMLDivElement>) => void;
   onRotate: () => void;
   /** Quarter-block fixtures only: walk to the next cell corner. */
   onCorner?: () => void;
@@ -875,6 +959,7 @@ function BlueprintObject({
       onPointerMove={editMode ? onPointerMove : undefined}
       onPointerUp={editMode ? onPointerUp : undefined}
       onPointerCancel={editMode ? onPointerCancel : undefined}
+      onClick={editMode ? onSelect : undefined}
     >
       <span
         className="rm-bp-obj-glyph"

@@ -1272,6 +1272,9 @@ type CommandMap = {
       heightU: number;
       depthMm: number;
       powerCapacityW?: number | null;
+      gridX?: number | null;
+      gridY?: number | null;
+      facing?: number | null;
     };
     result: Rack;
   };
