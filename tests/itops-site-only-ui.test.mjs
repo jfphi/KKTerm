@@ -152,6 +152,23 @@ test("Server Room rows expose Add Rack before Delete and final Properties", asyn
   assert.match(sites, /setRackDialog\(\{[\s\S]*siteId: site\.id,[\s\S]*rack: null,[\s\S]*defaultServerRoom: room\.key/);
 });
 
+test("Server Room and Rack rows expose deep Duplicate commands", async () => {
+  const sites = await read("src/modules/itops/SitesTab.tsx");
+  const state = await read("src/modules/itops/state.ts");
+  const tauri = await read("src/lib/tauri.ts");
+  const english = JSON.parse(await read("src/i18n/locales/en.json"));
+
+  assert.equal(english.itops.actions.duplicate, "Duplicate");
+  assert.match(sites, /label: t\("itops\.actions\.duplicate"\)/);
+  assert.match(sites, /iconSvg: nativeMenuIcons\.copy/);
+  assert.match(sites, /onDuplicate: \(\) =>\s*void duplicateServerRoomFromMenu/);
+  assert.match(sites, /onDuplicate: \(\) =>\s*void duplicateRackFromMenu/);
+  assert.match(state, /invokeCommand\("itops_duplicate_server_room", \{ id \}\)/);
+  assert.match(state, /invokeCommand\("itops_duplicate_rack", \{ id \}\)/);
+  assert.match(tauri, /itops_duplicate_server_room:/);
+  assert.match(tauri, /itops_duplicate_rack:/);
+});
+
 test("Server Rooms virtual row exposes its contextual add command", async () => {
   const sites = await read("src/modules/itops/SitesTab.tsx");
   const english = JSON.parse(await read("src/i18n/locales/en.json"));

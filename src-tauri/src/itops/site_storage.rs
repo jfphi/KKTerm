@@ -3,7 +3,7 @@
 // `itops/storage.rs` (free functions over `&SqliteConnection`, JSON `TEXT` for
 // non-relational fields, integer `sort_order`). Reuses `ItopsStorageError`.
 
-use rusqlite::{Connection as SqliteConnection, OptionalExtension, params};
+use rusqlite::{Connection as SqliteConnection, OptionalExtension, Transaction, params};
 
 use super::inventory::normalize_metadata;
 use super::storage::ItopsStorageError;
@@ -274,6 +274,64 @@ fn remove_json_map_key(raw: Option<String>, name: &str) -> Result<Option<String>
         .map_err(|error| ItopsStorageError::Validation(error.to_string()))
 }
 
+fn copy_json_map_key(
+    raw: Option<String>,
+    source_name: &str,
+    duplicate_name: &str,
+) -> Result<Option<String>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Ok(mut map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw)
+    else {
+        return Ok(Some(raw));
+    };
+    if let Some(value) = map.get(source_name).cloned() {
+        map.insert(duplicate_name.to_string(), value);
+    }
+    serde_json::to_string(&map)
+        .map(Some)
+        .map_err(|error| ItopsStorageError::Validation(error.to_string()))
+}
+
+fn duplicate_name_base(name: &str) -> &str {
+    let name = name.trim();
+    let Some((base, suffix)) = name.rsplit_once('#') else {
+        return name;
+    };
+    if !base.is_empty() && suffix.parse::<u64>().is_ok_and(|number| number >= 2) {
+        base
+    } else {
+        name
+    }
+}
+
+fn next_duplicate_name<'a>(
+    source_name: &str,
+    existing_names: impl Iterator<Item = &'a str>,
+) -> String {
+    let base = duplicate_name_base(source_name);
+    let mut highest = 1_u64;
+    for existing in existing_names {
+        let existing = existing.trim();
+        if existing.eq_ignore_ascii_case(base) {
+            highest = highest.max(1);
+            continue;
+        }
+        let Some((candidate_base, suffix)) = existing.rsplit_once('#') else {
+            continue;
+        };
+        if candidate_base.eq_ignore_ascii_case(base) {
+            if let Ok(number) = suffix.parse::<u64>() {
+                if number >= 2 {
+                    highest = highest.max(number);
+                }
+            }
+        }
+    }
+    format!("{base}#{}", highest + 1)
+}
+
 /// Update first-class Server Room properties. Renames every name-keyed
 /// dependent in one transaction so racks, fixtures, icons, and backgrounds
 /// cannot split across two room names.
@@ -408,6 +466,115 @@ pub fn delete_server_room(conn: &SqliteConnection, id: &str) -> Result<()> {
     tx.execute("DELETE FROM itops_server_rooms WHERE id = ?", params![id])?;
     tx.commit()?;
     Ok(())
+}
+
+pub fn duplicate_server_room(
+    conn: &SqliteConnection,
+    id: &str,
+    mut new_id: impl FnMut(&str) -> String,
+) -> Result<ServerRoom> {
+    let source = conn
+        .query_row(
+            "SELECT id, site_id, name, floor_color, sort_order
+             FROM itops_server_rooms WHERE id = ?",
+            params![id],
+            |row| {
+                Ok(ServerRoom {
+                    id: row.get(0)?,
+                    site_id: row.get(1)?,
+                    name: row.get(2)?,
+                    floor_color: row.get(3)?,
+                    sort_order: row.get(4)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or(ItopsStorageError::NotFound)?;
+    let room_names = list_server_rooms(conn, &source.site_id)?;
+    let duplicate_name = next_duplicate_name(
+        &source.name,
+        room_names.iter().map(|room| room.name.as_str()),
+    );
+    let source_racks = list_racks(conn, &source.site_id)?
+        .into_iter()
+        .filter(|rack| rack.server_room == source.name)
+        .collect::<Vec<_>>();
+    let source_objects = list_room_objects(conn, &source.site_id, &source.name)?;
+    let metadata: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT room_backgrounds_json, room_icons_json FROM itops_sites WHERE id = ?",
+            params![source.site_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let duplicate_id = new_id("room");
+    let next_sort: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM itops_server_rooms WHERE site_id = ?",
+        params![source.site_id],
+        |row| row.get(0),
+    )?;
+
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO itops_server_rooms (id, site_id, name, floor_color, sort_order)
+         VALUES (?, ?, ?, ?, ?)",
+        params![
+            duplicate_id,
+            source.site_id,
+            duplicate_name,
+            source.floor_color,
+            next_sort
+        ],
+    )?;
+    for rack in &source_racks {
+        insert_rack_clone(
+            &tx,
+            rack,
+            &new_id("rack"),
+            &rack.name,
+            &duplicate_name,
+            true,
+            &mut new_id,
+        )?;
+    }
+    for object in source_objects {
+        tx.execute(
+            "INSERT INTO itops_room_objects (id, site_id, server_room, kind, x, y, z, rot, corner)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                new_id("room-object"),
+                source.site_id,
+                duplicate_name,
+                object.kind,
+                object.x,
+                object.y,
+                object.z,
+                object.rot,
+                object.corner
+            ],
+        )?;
+    }
+    if let Some((backgrounds, icons)) = metadata {
+        tx.execute(
+            "UPDATE itops_sites
+             SET room_backgrounds_json = ?, room_icons_json = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?",
+            params![
+                copy_json_map_key(backgrounds, &source.name, &duplicate_name)?,
+                copy_json_map_key(icons, &source.name, &duplicate_name)?,
+                source.site_id
+            ],
+        )?;
+    }
+    tx.commit()?;
+
+    Ok(ServerRoom {
+        id: duplicate_id,
+        site_id: source.site_id,
+        name: duplicate_name,
+        floor_color: source.floor_color,
+        sort_order: next_sort,
+    })
 }
 
 fn validate_server_room(conn: &SqliteConnection, site_id: &str, name: &str) -> Result<String> {
@@ -757,6 +924,95 @@ pub fn delete_rack(conn: &SqliteConnection, id: &str) -> Result<()> {
         return Err(ItopsStorageError::NotFound);
     }
     Ok(())
+}
+
+fn insert_rack_clone(
+    tx: &Transaction<'_>,
+    source: &Rack,
+    duplicate_id: &str,
+    duplicate_name: &str,
+    server_room: &str,
+    preserve_placement: bool,
+    new_id: &mut impl FnMut(&str) -> String,
+) -> Result<()> {
+    let next_sort: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM itops_site_racks WHERE site_id = ?",
+        params![source.site_id],
+        |row| row.get(0),
+    )?;
+    let background_json = rack_background_to_json(&source.background)?;
+    tx.execute(
+        "INSERT INTO itops_site_racks
+            (id, site_id, name, server_room, rack_group, shell, background_json, height_u,
+             depth_mm, power_capacity_w, floor_x, floor_y, grid_x, grid_y, facing, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![
+            duplicate_id,
+            source.site_id,
+            duplicate_name,
+            server_room,
+            source.rack_group,
+            source.shell,
+            background_json,
+            source.height_u,
+            source.depth_mm,
+            source.power_capacity_w,
+            preserve_placement.then_some(source.floor_x).flatten(),
+            preserve_placement.then_some(source.floor_y).flatten(),
+            preserve_placement.then_some(source.grid_x).flatten(),
+            preserve_placement.then_some(source.grid_y).flatten(),
+            preserve_placement.then_some(source.facing).flatten(),
+            next_sort
+        ],
+    )?;
+    for item in &source.items {
+        tx.execute(
+            "INSERT INTO itops_site_rack_items
+                (id, rack_id, connection_id, kind, label, start_u, height_u, mount_face, metadata_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                new_id("ri"),
+                duplicate_id,
+                item.connection_id,
+                item.kind.as_db_str(),
+                item.label,
+                item.start_u,
+                item.height_u,
+                item.mount_face.as_db_str(),
+                metadata_to_json(&item.metadata)?
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn duplicate_rack(
+    conn: &SqliteConnection,
+    id: &str,
+    mut new_id: impl FnMut(&str) -> String,
+) -> Result<Rack> {
+    let source = fetch_rack(conn, id)?;
+    let room_racks = list_racks(conn, &source.site_id)?
+        .into_iter()
+        .filter(|rack| rack.server_room == source.server_room)
+        .collect::<Vec<_>>();
+    let duplicate_name = next_duplicate_name(
+        &source.name,
+        room_racks.iter().map(|rack| rack.name.as_str()),
+    );
+    let duplicate_id = new_id("rack");
+    let tx = conn.unchecked_transaction()?;
+    insert_rack_clone(
+        &tx,
+        &source,
+        &duplicate_id,
+        &duplicate_name,
+        &source.server_room,
+        false,
+        &mut new_id,
+    )?;
+    tx.commit()?;
+    fetch_rack(conn, &duplicate_id)
 }
 
 pub fn reorder_racks(conn: &SqliteConnection, site_id: &str, ordered_ids: &[String]) -> Result<()> {
@@ -1355,6 +1611,148 @@ mod tests {
             x_start,
             x_quarters,
         }
+    }
+
+    #[test]
+    fn duplicate_names_increment_from_the_unsuffixed_base() {
+        let names = ["Rack-1", "Rack-1#2", "Rack-1#4", "Other#9"];
+        assert_eq!(
+            next_duplicate_name("Rack-1", names.iter().copied()),
+            "Rack-1#5"
+        );
+        assert_eq!(
+            next_duplicate_name("Rack-1#2", names.iter().copied()),
+            "Rack-1#5"
+        );
+    }
+
+    #[test]
+    fn duplicate_rack_clones_devices_and_resets_room_coordinates() {
+        let conn = open_test_db();
+        create_rack(
+            &conn,
+            "r1",
+            "f1",
+            "Rack-1",
+            "Room B",
+            "Row A",
+            Some("white"),
+            42,
+            1000,
+            Some(8000),
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE itops_site_racks
+             SET background_json = '{\"kind\":\"preset\",\"preset\":\"mist\"}',
+                 floor_x = 10, floor_y = 20, grid_x = 3, grid_y = 4, facing = 2
+             WHERE id = 'r1'",
+            [],
+        )
+        .unwrap();
+        place_rack_item(
+            &conn,
+            "item-1",
+            "r1",
+            None,
+            RackItemKind::Switch,
+            "Core switch",
+            10,
+            2,
+            RackItemMetadata::default(),
+        )
+        .unwrap();
+
+        let mut sequence = 0;
+        let duplicated = duplicate_rack(&conn, "r1", |prefix| {
+            sequence += 1;
+            format!("{prefix}-copy-{sequence}")
+        })
+        .unwrap();
+
+        assert_eq!(duplicated.name, "Rack-1#2");
+        assert_eq!(duplicated.rack_group, "Row A");
+        assert_eq!(duplicated.shell.as_deref(), Some("white"));
+        assert_eq!(duplicated.power_capacity_w, Some(8000));
+        assert_eq!(
+            duplicated.background,
+            Some(DashboardBackground::Preset {
+                preset: "mist".to_string()
+            })
+        );
+        assert_eq!(duplicated.items.len(), 1);
+        assert_eq!(duplicated.items[0].label, "Core switch");
+        assert_eq!(duplicated.floor_x, None);
+        assert_eq!(duplicated.floor_y, None);
+        assert_eq!(duplicated.grid_x, None);
+        assert_eq!(duplicated.grid_y, None);
+        assert_eq!(duplicated.facing, None);
+    }
+
+    #[test]
+    fn duplicate_server_room_clones_topology_and_room_metadata() {
+        let conn = open_test_db();
+        create_rack(
+            &conn, "r1", "f1", "Rack-1", "Room B", "", None, 42, 1000, None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE itops_site_racks SET grid_x = 3, grid_y = 4, facing = 1 WHERE id = 'r1'",
+            [],
+        )
+        .unwrap();
+        place_rack_item(
+            &conn,
+            "item-1",
+            "r1",
+            None,
+            RackItemKind::Pdu,
+            "PDU",
+            1,
+            1,
+            RackItemMetadata::default(),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO itops_room_objects (id, site_id, server_room, kind, x, y, z, rot, corner)
+             VALUES ('object-1', 'f1', 'Room B', 'camera', 2, 3, 4, 1, 2)",
+            [],
+        )
+        .unwrap();
+
+        let mut sequence = 0;
+        let duplicated = duplicate_server_room(&conn, "room-b", |prefix| {
+            sequence += 1;
+            format!("{prefix}-copy-{sequence}")
+        })
+        .unwrap();
+
+        assert_eq!(duplicated.name, "Room B#2");
+        let racks = list_racks(&conn, "f1").unwrap();
+        let duplicated_rack = racks
+            .iter()
+            .find(|rack| rack.server_room == duplicated.name)
+            .unwrap();
+        assert_eq!(duplicated_rack.name, "Rack-1");
+        assert_eq!(duplicated_rack.grid_x, Some(3));
+        assert_eq!(duplicated_rack.grid_y, Some(4));
+        assert_eq!(duplicated_rack.facing, Some(1));
+        assert_eq!(duplicated_rack.items.len(), 1);
+        assert_eq!(
+            list_room_objects(&conn, "f1", &duplicated.name)
+                .unwrap()
+                .len(),
+            1
+        );
+        let (backgrounds, icons): (String, String) = conn
+            .query_row(
+                "SELECT room_backgrounds_json, room_icons_json FROM itops_sites WHERE id = 'f1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(backgrounds.contains("\"Room B#2\""));
+        assert!(icons.contains("\"Room B#2\""));
     }
 
     #[test]

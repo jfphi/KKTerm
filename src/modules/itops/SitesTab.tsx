@@ -200,6 +200,7 @@ export function SitesTab({
   const loadServerRooms = useItOpsStore((state) => state.loadServerRooms);
   const removeSite = useItOpsStore((state) => state.removeSite);
   const deleteServerRoom = useItOpsStore((state) => state.deleteServerRoom);
+  const duplicateServerRoom = useItOpsStore((state) => state.duplicateServerRoom);
   const taskCount = useItOpsStore((state) => state.tasks.length);
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -236,6 +237,7 @@ export function SitesTab({
   const moveRackItem = useItOpsStore((state) => state.moveRackItem);
   const placeRackItem = useItOpsStore((state) => state.placeRackItem);
   const deleteRack = useItOpsStore((state) => state.deleteRack);
+  const duplicateRack = useItOpsStore((state) => state.duplicateRack);
   const removeRackItem = useItOpsStore((state) => state.removeRackItem);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
@@ -470,12 +472,14 @@ export function SitesTab({
     {
       onProperties,
       onDelete,
+      onDuplicate,
       deleteDisabled = false,
       addAction,
       sortItems,
     }: {
       onProperties: () => void;
       onDelete: () => void;
+      onDuplicate?: () => void;
       deleteDisabled?: boolean;
       addAction?: { label: string; action: () => void };
       sortItems?: NativeContextMenuItem[];
@@ -501,6 +505,14 @@ export function SitesTab({
       });
       items.push({ kind: "separator" });
     }
+    if (onDuplicate) {
+      items.push({
+        kind: "item",
+        label: t("itops.actions.duplicate"),
+        iconSvg: nativeMenuIcons.copy,
+        action: onDuplicate,
+      });
+    }
     items.push(
       {
         kind: "item",
@@ -518,6 +530,24 @@ export function SitesTab({
       },
     );
     void showNativeContextMenu(items, { x: event.clientX, y: event.clientY });
+  }
+
+  async function duplicateServerRoomFromMenu(siteId: string, roomId: string) {
+    try {
+      await duplicateServerRoom(siteId, roomId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
+    }
+  }
+
+  async function duplicateRackFromMenu(siteId: string, rackId: string) {
+    try {
+      await duplicateRack(siteId, rackId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
+    }
   }
 
   function showAddServerRoomMenu(event: ReactMouseEvent<HTMLElement>, siteId: string) {
@@ -989,6 +1019,8 @@ export function SitesTab({
                                             sortItems: rackSortMenuItems(roomRackSortKey),
                                             onProperties: () =>
                                               setServerRoomDialog({ siteId: site.id, room: room.room! }),
+                                            onDuplicate: () =>
+                                              void duplicateServerRoomFromMenu(site.id, room.room!.id),
                                             onDelete: () =>
                                               setPendingDelete({
                                                 kind: "serverRoom",
@@ -1020,6 +1052,8 @@ export function SitesTab({
                                           showTopologyMenu(event, {
                                             onProperties: () =>
                                               setRackDialog({ siteId: site.id, rack }),
+                                            onDuplicate: () =>
+                                              void duplicateRackFromMenu(site.id, rack.id),
                                             onDelete: () =>
                                               setPendingDelete({ kind: "rack", siteId: site.id, rack }),
                                           })

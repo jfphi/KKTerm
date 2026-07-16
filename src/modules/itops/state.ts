@@ -282,10 +282,12 @@ interface ItOpsState {
     floorColor: string,
   ) => Promise<ServerRoom>;
   deleteServerRoom: (siteId: string, id: string) => Promise<void>;
+  duplicateServerRoom: (siteId: string, id: string) => Promise<ServerRoom>;
   loadRacks: (siteId: string) => Promise<void>;
   createRack: (siteId: string, input: RackInput) => Promise<Rack>;
   updateRack: (siteId: string, id: string, input: RackInput) => Promise<void>;
   deleteRack: (siteId: string, id: string) => Promise<void>;
+  duplicateRack: (siteId: string, id: string) => Promise<Rack>;
   /** Persist Server Room View placements durably; updates the cache in place. */
   setRackPlacements: (
     siteId: string,
@@ -510,6 +512,12 @@ export const useItOpsStore = create<ItOpsState>((set, get) => ({
     await get().loadServerRooms(siteId);
   },
 
+  async duplicateServerRoom(siteId, id) {
+    const duplicated = await invokeCommand("itops_duplicate_server_room", { id });
+    await Promise.all([get().loadSites(), get().loadServerRooms(siteId), get().loadRacks(siteId)]);
+    return duplicated;
+  },
+
   async loadRacks(siteId) {
     if (!isTauriRuntime()) {
       set({ racksBySite: { ...get().racksBySite, [siteId]: [] } });
@@ -533,6 +541,12 @@ export const useItOpsStore = create<ItOpsState>((set, get) => ({
   async deleteRack(siteId, id) {
     await invokeCommand("itops_delete_rack", { id });
     await get().loadRacks(siteId);
+  },
+
+  async duplicateRack(siteId, id) {
+    const duplicated = await invokeCommand("itops_duplicate_rack", { id });
+    await get().loadRacks(siteId);
+    return duplicated;
   },
 
   async setRackPlacements(siteId, kind, entries) {

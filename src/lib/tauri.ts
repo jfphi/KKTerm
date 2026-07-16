@@ -1232,6 +1232,10 @@ type CommandMap = {
     args: { id: string };
     result: void;
   };
+  itops_duplicate_server_room: {
+    args: { id: string };
+    result: ServerRoom;
+  };
   itops_create_rack: {
     args: {
       siteId: string;
@@ -1256,6 +1260,10 @@ type CommandMap = {
       depthMm: number;
       powerCapacityW?: number | null;
     };
+    result: Rack;
+  };
+  itops_duplicate_rack: {
+    args: { id: string };
     result: Rack;
   };
   itops_set_rack_placements: {
