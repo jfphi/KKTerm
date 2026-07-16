@@ -64,6 +64,7 @@ import {
 import {
   buildSettingsSearchResults,
   SETTINGS_SEARCH_KEYS,
+  settingsSearchTextMatchScore,
 } from "./settingsSearch";
 
 export { AI_PROVIDER_SECRET_OWNER_ID };
@@ -98,6 +99,12 @@ type SettingsNavItem = {
   labelKey: string;
   module?: ModuleKind;
   requires?: "installer" | "rdp";
+};
+
+type PendingSettingsSearchTarget = {
+  sectionId: SettingsSectionId;
+  key?: string;
+  label: string;
 };
 
 const SETTINGS_NAV: readonly SettingsNavItem[] = [
@@ -136,8 +143,12 @@ export function SettingsPage({
   const { i18n, t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSearchResultKey, setSelectedSearchResultKey] = useState<string | null>(null);
+  const [pendingSearchTarget, setPendingSearchTarget] =
+    useState<PendingSettingsSearchTarget | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const settingsContentRef = useRef<HTMLElement>(null);
+  const highlightedSearchTargetRef = useRef<HTMLElement | null>(null);
+  const highlightTimeoutRef = useRef<number | null>(null);
   const [saveRegistrations, setSaveRegistrations] = useState<
     Partial<Record<SettingsSectionId, SettingsSaveRegistration>>
   >({});
@@ -178,6 +189,14 @@ export function SettingsPage({
       [sectionId as SettingsSectionId]: registration,
     }));
   }, []);
+  const clearHighlightedSearchTarget = useCallback(() => {
+    highlightedSearchTargetRef.current?.classList.remove("settings-search-target-highlight");
+    highlightedSearchTargetRef.current = null;
+    if (highlightTimeoutRef.current !== null) {
+      window.clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+  }, []);
   const dirtyRegistrations = SETTINGS_SECTION_IDS
     .map((sectionId) => saveRegistrations[sectionId])
     .filter((registration): registration is SettingsSaveRegistration =>
@@ -209,6 +228,45 @@ export function SettingsPage({
     });
   }, [activeSectionId]);
 
+  useEffect(() => {
+    if (!pendingSearchTarget || pendingSearchTarget.sectionId !== activeSectionId) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const panel = settingsContentRef.current?.querySelector<HTMLElement>(
+        `[data-settings-section-id="${pendingSearchTarget.sectionId}"]`,
+      );
+      if (!panel) {
+        return;
+      }
+      const textTarget = findSettingsSearchTextTarget(panel, pendingSearchTarget.label);
+      const highlightTarget = textTarget
+        ? settingsSearchHighlightTarget(textTarget, panel)
+        : panel.querySelector<HTMLElement>(".settings-card") ?? panel;
+
+      clearHighlightedSearchTarget();
+      highlightTarget.classList.add("settings-search-target-highlight");
+      highlightedSearchTargetRef.current = highlightTarget;
+      highlightTarget.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+      highlightTimeoutRef.current = window.setTimeout(
+        clearHighlightedSearchTarget,
+        2200,
+      );
+      setPendingSearchTarget(null);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSectionId, clearHighlightedSearchTarget, pendingSearchTarget]);
+
+  useEffect(() => clearHighlightedSearchTarget, [clearHighlightedSearchTarget]);
+
   async function handleSaveAllDirty({ quitAfter = false }: { quitAfter?: boolean } = {}) {
     const registrationsToSave = SETTINGS_SECTION_IDS
       .map((sectionId) => saveRegistrations[sectionId])
@@ -238,12 +296,13 @@ export function SettingsPage({
     onBack();
   }
 
-  function handleSearchResultClick(sectionId: SettingsSectionId, resultKey?: string) {
-    setSelectedSearchResultKey(resultKey ? `${sectionId}:${resultKey}` : null);
+  function handleSearchResultClick(
+    sectionId: SettingsSectionId,
+    result: { key?: string; label: string },
+  ) {
+    setSelectedSearchResultKey(result.key ? `${sectionId}:${result.key}` : null);
+    setPendingSearchTarget({ sectionId, ...result });
     onActiveSectionChange(sectionId);
-    window.requestAnimationFrame(() => {
-      settingsContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-    });
   }
 
   function clearSearch() {
@@ -262,6 +321,7 @@ export function SettingsPage({
       >
         <div
           className="settings-section-panel"
+          data-settings-section-id={sectionId}
           hidden={activeSectionId !== sectionId}
         >
           {shouldMount ? children : null}
@@ -353,7 +413,9 @@ export function SettingsPage({
                     <div className="settings-search-result-group" key={result.id}>
                       <button
                         className={settingsNavItemClass(result.id, activeSectionId)}
-                        onClick={() => handleSearchResultClick(result.id)}
+                        onClick={() => handleSearchResultClick(result.id, {
+                          label: result.label,
+                        })}
                         type="button"
                       >
                         <SettingsNavIcon item={item} />
@@ -363,7 +425,7 @@ export function SettingsPage({
                         <button
                           className={`settings-search-hit${selectedSearchResultKey === `${result.id}:${match.key}` ? " active" : ""}`}
                           key={match.key}
-                          onClick={() => handleSearchResultClick(result.id, match.key)}
+                          onClick={() => handleSearchResultClick(result.id, match)}
                           type="button"
                         >
                           {match.label}
@@ -479,4 +541,45 @@ function SettingsNavIcon({ item }: { item: SettingsNavItem }) {
       <Icon size={14} />
     </span>
   );
+}
+
+function findSettingsSearchTextTarget(root: HTMLElement, label: string) {
+  const candidates = root.querySelectorAll<HTMLElement>(
+    "legend, label, button, option, h2, h3, strong, small, p, [aria-label]",
+  );
+  let bestTarget: HTMLElement | null = null;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const values = [candidate.textContent ?? "", candidate.getAttribute("aria-label") ?? ""];
+    const score = Math.max(...values.map((value) =>
+      settingsSearchTextMatchScore(label, value),
+    ));
+    if (score > bestScore) {
+      bestTarget = candidate;
+      bestScore = score;
+    }
+    if (bestScore === 3) {
+      break;
+    }
+  }
+  return bestTarget;
+}
+
+function settingsSearchHighlightTarget(target: HTMLElement, root: HTMLElement) {
+  const container = target.closest<HTMLElement>([
+    ".settings-toggle-row",
+    ".settings-summary-item",
+    ".settings-list-row",
+    ".settings-reset-layout",
+    ".settings-data-actions",
+    ".shortcut-row",
+    ".theme-card",
+    ".mcp-server-row",
+    ".assistant-skill-row",
+    "fieldset.settings-subsection",
+    "label",
+    "button",
+    ".settings-card",
+  ].join(", "));
+  return container && root.contains(container) ? container : target;
 }

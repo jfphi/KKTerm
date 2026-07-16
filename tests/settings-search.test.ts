@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   buildSettingsSearchResults,
   SETTINGS_SEARCH_KEYS,
+  settingsSearchDisplayLabel,
+  settingsSearchTextMatchScore,
   type SettingsSearchSection,
 } from "../src/modules/settings/settingsSearch";
 
@@ -115,8 +117,40 @@ test("Settings sidebar shows a conditional clear action and routes result clicks
 
   assert.match(source, /\{searchQuery \? \(\s*<button[\s\S]*?aria-label=\{t\("common\.clear"\)\}/);
   assert.match(source, /function clearSearch\(\)[\s\S]*?setSearchQuery\(""\)/);
-  assert.match(source, /onClick=\{\(\) => handleSearchResultClick\(result\.id, match\.key\)\}/);
+  assert.match(source, /onClick=\{\(\) => handleSearchResultClick\(result\.id, match\)\}/);
   assert.match(source, /onActiveSectionChange\(sectionId\)/);
+});
+
+test("Settings search target matching handles exact and interpolated localized text", () => {
+  assert.equal(settingsSearchTextMatchScore("自動備份", "自動備份"), 3);
+  assert.equal(
+    settingsSearchTextMatchScore("上次備份：{{value}}", "上次備份：2026/7/17"),
+    1,
+  );
+  assert.equal(settingsSearchTextMatchScore("自動備份", "應用程式更新"), 0);
+});
+
+test("Settings search result labels omit interpolation placeholders", () => {
+  assert.equal(settingsSearchDisplayLabel("上次備份：{{value}}"), "上次備份");
+  assert.equal(settingsSearchDisplayLabel("Last checked {{time}}"), "Last checked");
+  assert.equal(settingsSearchDisplayLabel("Version"), "Version");
+});
+
+test("Settings result clicks resolve, scroll, and highlight the detail target", () => {
+  const pageSource = readFileSync(
+    new URL("../src/modules/settings/SettingsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  const styleSource = readFileSync(
+    new URL("../src/modules/settings/settings.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(pageSource, /data-settings-section-id=\{sectionId\}/);
+  assert.match(pageSource, /findSettingsSearchTextTarget\(panel, pendingSearchTarget\.label\)/);
+  assert.match(pageSource, /highlightTarget\.scrollIntoView\(/);
+  assert.match(pageSource, /classList\.add\("settings-search-target-highlight"\)/);
+  assert.match(styleSource, /\.settings-search-target-highlight\s*\{[^}]*outline:[^}]*var\(--accent\)/s);
 });
 
 test("Settings search renders results in the selected UI language, not the fallback", () => {
