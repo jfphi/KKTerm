@@ -4,7 +4,7 @@
 - **Namespace**: `itops`
 - **File/component**: `src/modules/itops/SitesTab.tsx`
 - **UI role**: `label`
-- **User flow**: `Shown in the native right-click menu for a Server Room or Rack. Activating it creates a deep copy with the next incremental #N name.`
+- **User flow**: `Shown in the native right-click menu for a Server Room or Rack. Activating it opens Properties with the next incremental #N name; Save creates the deep copy and Cancel creates nothing.`
 - **Tone**: `concise/neutral`
 - **Placeholders**: `none`
 - **Context/meaning**: `Duplicate means create a new independent topology entity with copied properties and children, not copy text to the clipboard.`

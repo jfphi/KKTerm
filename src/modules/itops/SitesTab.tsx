@@ -44,6 +44,7 @@ import {
   nextRackSequenceName,
   type RackPlacementSequence,
 } from "./rackSequence";
+import { nextTopologyDuplicateName } from "./topologyDuplicate";
 import { ServerRoomDialog } from "./ServerRoomDialog";
 import { RackItemDialog, RACK_ITEM_KINDS, type RackItemDraft } from "./RackItemDialog";
 import { RackDevice } from "./RackDevice";
@@ -200,7 +201,6 @@ export function SitesTab({
   const loadServerRooms = useItOpsStore((state) => state.loadServerRooms);
   const removeSite = useItOpsStore((state) => state.removeSite);
   const deleteServerRoom = useItOpsStore((state) => state.deleteServerRoom);
-  const duplicateServerRoom = useItOpsStore((state) => state.duplicateServerRoom);
   const taskCount = useItOpsStore((state) => state.tasks.length);
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -212,6 +212,8 @@ export function SitesTab({
   const [rackDialog, setRackDialog] = useState<{
     siteId: string;
     rack: Rack | null;
+    duplicateOf?: Rack;
+    duplicateName?: string;
     defaultServerRoom?: string;
     /** Picker placement flow: consume the saved rack instead of drilling in. */
     onSaved?: (saved: Rack, sequence: RackPlacementSequence | null) => void;
@@ -219,6 +221,8 @@ export function SitesTab({
   const [serverRoomDialog, setServerRoomDialog] = useState<{
     siteId: string;
     room: ServerRoom | null;
+    duplicateOf?: ServerRoom;
+    duplicateName?: string;
   } | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [itemDialog, setItemDialog] = useState<{
@@ -237,7 +241,6 @@ export function SitesTab({
   const moveRackItem = useItOpsStore((state) => state.moveRackItem);
   const placeRackItem = useItOpsStore((state) => state.placeRackItem);
   const deleteRack = useItOpsStore((state) => state.deleteRack);
-  const duplicateRack = useItOpsStore((state) => state.duplicateRack);
   const removeRackItem = useItOpsStore((state) => state.removeRackItem);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
@@ -530,24 +533,6 @@ export function SitesTab({
       },
     );
     void showNativeContextMenu(items, { x: event.clientX, y: event.clientY });
-  }
-
-  async function duplicateServerRoomFromMenu(siteId: string, roomId: string) {
-    try {
-      await duplicateServerRoom(siteId, roomId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
-    }
-  }
-
-  async function duplicateRackFromMenu(siteId: string, rackId: string) {
-    try {
-      await duplicateRack(siteId, rackId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(t("itops.errorNotice", { message }), { tone: "error" });
-    }
   }
 
   function showAddServerRoomMenu(event: ReactMouseEvent<HTMLElement>, siteId: string) {
@@ -1020,7 +1005,17 @@ export function SitesTab({
                                             onProperties: () =>
                                               setServerRoomDialog({ siteId: site.id, room: room.room! }),
                                             onDuplicate: () =>
-                                              void duplicateServerRoomFromMenu(site.id, room.room!.id),
+                                              setServerRoomDialog({
+                                                siteId: site.id,
+                                                room: null,
+                                                duplicateOf: room.room!,
+                                                duplicateName: nextTopologyDuplicateName(
+                                                  room.room!.name,
+                                                  serverRoomsBySite[site.id]?.map(
+                                                    (entry) => entry.name,
+                                                  ) ?? [],
+                                                ),
+                                              }),
                                             onDelete: () =>
                                               setPendingDelete({
                                                 kind: "serverRoom",
@@ -1053,7 +1048,15 @@ export function SitesTab({
                                             onProperties: () =>
                                               setRackDialog({ siteId: site.id, rack }),
                                             onDuplicate: () =>
-                                              void duplicateRackFromMenu(site.id, rack.id),
+                                              setRackDialog({
+                                                siteId: site.id,
+                                                rack: null,
+                                                duplicateOf: rack,
+                                                duplicateName: nextTopologyDuplicateName(
+                                                  rack.name,
+                                                  room.racks.map((entry) => entry.name),
+                                                ),
+                                              }),
                                             onDelete: () =>
                                               setPendingDelete({ kind: "rack", siteId: site.id, rack }),
                                           })
@@ -1176,6 +1179,8 @@ export function SitesTab({
           sites={sites}
           serverRoomsBySite={serverRoomsBySite}
           rack={rackDialog.rack}
+          duplicateOf={rackDialog.duplicateOf}
+          duplicateName={rackDialog.duplicateName}
           defaultServerRoom={rackDialog.defaultServerRoom}
           placementMode={!!rackDialog.onSaved}
           onClose={() => setRackDialog(null)}
@@ -1196,6 +1201,8 @@ export function SitesTab({
           sites={sites}
           defaultSiteId={serverRoomDialog.siteId}
           room={serverRoomDialog.room}
+          duplicateOf={serverRoomDialog.duplicateOf}
+          duplicateName={serverRoomDialog.duplicateName}
           onClose={() => setServerRoomDialog(null)}
           onSaved={(saved) => {
             setActiveId(saved.siteId);

@@ -294,44 +294,6 @@ fn copy_json_map_key(
         .map_err(|error| ItopsStorageError::Validation(error.to_string()))
 }
 
-fn duplicate_name_base(name: &str) -> &str {
-    let name = name.trim();
-    let Some((base, suffix)) = name.rsplit_once('#') else {
-        return name;
-    };
-    if !base.is_empty() && suffix.parse::<u64>().is_ok_and(|number| number >= 2) {
-        base
-    } else {
-        name
-    }
-}
-
-fn next_duplicate_name<'a>(
-    source_name: &str,
-    existing_names: impl Iterator<Item = &'a str>,
-) -> String {
-    let base = duplicate_name_base(source_name);
-    let mut highest = 1_u64;
-    for existing in existing_names {
-        let existing = existing.trim();
-        if existing.eq_ignore_ascii_case(base) {
-            highest = highest.max(1);
-            continue;
-        }
-        let Some((candidate_base, suffix)) = existing.rsplit_once('#') else {
-            continue;
-        };
-        if candidate_base.eq_ignore_ascii_case(base) {
-            if let Ok(number) = suffix.parse::<u64>() {
-                if number >= 2 {
-                    highest = highest.max(number);
-                }
-            }
-        }
-    }
-    format!("{base}#{}", highest + 1)
-}
-
 /// Update first-class Server Room properties. Renames every name-keyed
 /// dependent in one transaction so racks, fixtures, icons, and backgrounds
 /// cannot split across two room names.
@@ -471,6 +433,8 @@ pub fn delete_server_room(conn: &SqliteConnection, id: &str) -> Result<()> {
 pub fn duplicate_server_room(
     conn: &SqliteConnection,
     id: &str,
+    name: &str,
+    floor_color: &str,
     mut new_id: impl FnMut(&str) -> String,
 ) -> Result<ServerRoom> {
     let source = conn
@@ -490,11 +454,26 @@ pub fn duplicate_server_room(
         )
         .optional()?
         .ok_or(ItopsStorageError::NotFound)?;
-    let room_names = list_server_rooms(conn, &source.site_id)?;
-    let duplicate_name = next_duplicate_name(
-        &source.name,
-        room_names.iter().map(|room| room.name.as_str()),
-    );
+    let duplicate_name = name.trim();
+    if duplicate_name.is_empty() {
+        return Err(ItopsStorageError::Validation(
+            "server room name must not be empty".to_string(),
+        ));
+    }
+    let duplicate: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM itops_server_rooms
+            WHERE site_id = ? AND name = ? COLLATE NOCASE
+         )",
+        params![source.site_id, duplicate_name],
+        |row| row.get(0),
+    )?;
+    if duplicate {
+        return Err(ItopsStorageError::Validation(
+            "a server room with that name already exists".to_string(),
+        ));
+    }
+    let floor_color = validate_floor_color(floor_color)?;
     let source_racks = list_racks(conn, &source.site_id)?
         .into_iter()
         .filter(|rack| rack.server_room == source.name)
@@ -522,7 +501,7 @@ pub fn duplicate_server_room(
             duplicate_id,
             source.site_id,
             duplicate_name,
-            source.floor_color,
+            floor_color,
             next_sort
         ],
     )?;
@@ -571,8 +550,8 @@ pub fn duplicate_server_room(
     Ok(ServerRoom {
         id: duplicate_id,
         site_id: source.site_id,
-        name: duplicate_name,
-        floor_color: source.floor_color,
+        name: duplicate_name.to_string(),
+        floor_color,
         sort_order: next_sort,
     })
 }
@@ -989,24 +968,44 @@ fn insert_rack_clone(
 pub fn duplicate_rack(
     conn: &SqliteConnection,
     id: &str,
+    name: &str,
+    server_room: &str,
+    rack_group: &str,
+    shell: Option<&str>,
+    height_u: u32,
+    depth_mm: u32,
+    power_capacity_w: Option<u32>,
     mut new_id: impl FnMut(&str) -> String,
 ) -> Result<Rack> {
-    let source = fetch_rack(conn, id)?;
-    let room_racks = list_racks(conn, &source.site_id)?
-        .into_iter()
-        .filter(|rack| rack.server_room == source.server_room)
-        .collect::<Vec<_>>();
-    let duplicate_name = next_duplicate_name(
-        &source.name,
-        room_racks.iter().map(|rack| rack.name.as_str()),
-    );
+    let mut source = fetch_rack(conn, id)?;
+    let old_height_u = source.height_u;
+    source.name = validate_name(name)?;
+    source.server_room = validate_server_room(conn, &source.site_id, server_room)?;
+    source.rack_group = rack_group.trim().to_string();
+    source.shell = normalize_shell(shell);
+    source.height_u = validate_height(height_u)?;
+    source.depth_mm = validate_depth(depth_mm)?;
+    source.power_capacity_w = validate_power_capacity(power_capacity_w)?;
+    for item in &mut source.items {
+        if item.kind == RackItemKind::Kuaiguai && item.start_u == old_height_u + 1 {
+            item.start_u = source.height_u + 1;
+            continue;
+        }
+        if item.start_u + item.height_u - 1 > source.height_u {
+            return Err(ItopsStorageError::Validation(format!(
+                "cannot shrink to {}U: an item occupies U{}",
+                source.height_u,
+                item.start_u + item.height_u - 1
+            )));
+        }
+    }
     let duplicate_id = new_id("rack");
     let tx = conn.unchecked_transaction()?;
     insert_rack_clone(
         &tx,
         &source,
         &duplicate_id,
-        &duplicate_name,
+        &source.name,
         &source.server_room,
         false,
         &mut new_id,
@@ -1614,19 +1613,6 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_names_increment_from_the_unsuffixed_base() {
-        let names = ["Rack-1", "Rack-1#2", "Rack-1#4", "Other#9"];
-        assert_eq!(
-            next_duplicate_name("Rack-1", names.iter().copied()),
-            "Rack-1#5"
-        );
-        assert_eq!(
-            next_duplicate_name("Rack-1#2", names.iter().copied()),
-            "Rack-1#5"
-        );
-    }
-
-    #[test]
     fn duplicate_rack_clones_devices_and_resets_room_coordinates() {
         let conn = open_test_db();
         create_rack(
@@ -1664,10 +1650,21 @@ mod tests {
         .unwrap();
 
         let mut sequence = 0;
-        let duplicated = duplicate_rack(&conn, "r1", |prefix| {
-            sequence += 1;
-            format!("{prefix}-copy-{sequence}")
-        })
+        let duplicated = duplicate_rack(
+            &conn,
+            "r1",
+            "Rack-1#2",
+            "Room B",
+            "Row A",
+            Some("white"),
+            42,
+            1000,
+            Some(8000),
+            |prefix| {
+                sequence += 1;
+                format!("{prefix}-copy-{sequence}")
+            },
+        )
         .unwrap();
 
         assert_eq!(duplicated.name, "Rack-1#2");
@@ -1721,13 +1718,14 @@ mod tests {
         .unwrap();
 
         let mut sequence = 0;
-        let duplicated = duplicate_server_room(&conn, "room-b", |prefix| {
+        let duplicated = duplicate_server_room(&conn, "room-b", "Room B#2", "blue", |prefix| {
             sequence += 1;
             format!("{prefix}-copy-{sequence}")
         })
         .unwrap();
 
         assert_eq!(duplicated.name, "Room B#2");
+        assert_eq!(duplicated.floor_color, "blue");
         let racks = list_racks(&conn, "f1").unwrap();
         let duplicated_rack = racks
             .iter()

@@ -452,11 +452,13 @@ Delete sits above Properties and routes to the shared danger `ConfirmSheet`;
 the seeded Default Site shows Delete disabled. A Server Room also places
 `itops.racks.addRackAction` above Delete and opens the New Rack dialog already
 scoped to that Server Room. Server Room and Rack rows also expose
-`itops.actions.duplicate`: the deep copy receives the next available `#N`
-suffix beginning at `#2`. A Rack copy includes its cabinet properties,
-background, and Rack Devices but starts without overlapping floor-plan or 2.5D
-coordinates. A Server Room copy includes its finish, icon, background, room
-objects, Racks, Rack Devices, and internal spatial layout.
+`itops.actions.duplicate`: it opens the existing Properties dialog with the
+next available `#N` suffix beginning at `#2` and the source properties
+prefilled. Save performs the deep copy; Cancel creates nothing. A Rack copy
+includes its cabinet properties, background, and Rack Devices but starts
+without overlapping floor-plan or 2.5D coordinates. A Server Room copy
+includes its finish, icon, background, room objects, Racks, Rack Devices, and
+internal spatial layout.
 When the virtual Server Rooms row is selected, an `itops.racks.sortAction`
 icon button appears immediately left of the tree-wide collapse/expand controls.
 Its `itops.racks.sortAscending` and `itops.racks.sortDescending` native menu

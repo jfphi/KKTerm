@@ -161,10 +161,13 @@ test("Server Room and Rack rows expose deep Duplicate commands", async () => {
   assert.equal(english.itops.actions.duplicate, "Duplicate");
   assert.match(sites, /label: t\("itops\.actions\.duplicate"\)/);
   assert.match(sites, /iconSvg: nativeMenuIcons\.copy/);
-  assert.match(sites, /onDuplicate: \(\) =>\s*void duplicateServerRoomFromMenu/);
-  assert.match(sites, /onDuplicate: \(\) =>\s*void duplicateRackFromMenu/);
-  assert.match(state, /invokeCommand\("itops_duplicate_server_room", \{ id \}\)/);
-  assert.match(state, /invokeCommand\("itops_duplicate_rack", \{ id \}\)/);
+  assert.match(sites, /onDuplicate: \(\) =>\s*setServerRoomDialog\(\{/);
+  assert.match(sites, /onDuplicate: \(\) =>\s*setRackDialog\(\{/);
+  assert.match(sites, /duplicateName: nextTopologyDuplicateName\(/);
+  assert.match(sites, /duplicateOf=\{rackDialog\.duplicateOf\}/);
+  assert.match(sites, /duplicateOf=\{serverRoomDialog\.duplicateOf\}/);
+  assert.match(state, /invokeCommand\("itops_duplicate_server_room", \{/);
+  assert.match(state, /invokeCommand\("itops_duplicate_rack", \{ id, \.\.\.input \}\)/);
   assert.match(tauri, /itops_duplicate_server_room:/);
   assert.match(tauri, /itops_duplicate_rack:/);
 });

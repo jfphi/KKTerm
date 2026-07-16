@@ -369,9 +369,15 @@ pub fn itops_delete_server_room(app: AppHandle, id: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn itops_duplicate_server_room(app: AppHandle, id: String) -> Result<ServerRoom, String> {
+pub fn itops_duplicate_server_room(
+    app: AppHandle,
+    id: String,
+    name: String,
+    floor_color: String,
+) -> Result<ServerRoom, String> {
     storage(&app).with_connection_infallible(|conn| {
-        topo::duplicate_server_room(conn, &id, new_itops_id).map_err(|error| error.to_string())
+        topo::duplicate_server_room(conn, &id, &name, &floor_color, new_itops_id)
+            .map_err(|error| error.to_string())
     })
 }
 
@@ -436,9 +442,32 @@ pub fn itops_update_rack(
 }
 
 #[tauri::command]
-pub fn itops_duplicate_rack(app: AppHandle, id: String) -> Result<Rack, String> {
+#[allow(clippy::too_many_arguments)]
+pub fn itops_duplicate_rack(
+    app: AppHandle,
+    id: String,
+    name: String,
+    server_room: String,
+    rack_group: String,
+    shell: Option<String>,
+    height_u: u32,
+    depth_mm: u32,
+    power_capacity_w: Option<u32>,
+) -> Result<Rack, String> {
     storage(&app).with_connection_infallible(|conn| {
-        topo::duplicate_rack(conn, &id, new_itops_id).map_err(|error| error.to_string())
+        topo::duplicate_rack(
+            conn,
+            &id,
+            &name,
+            &server_room,
+            &rack_group,
+            shell.as_deref(),
+            height_u,
+            depth_mm,
+            power_capacity_w,
+            new_itops_id,
+        )
+        .map_err(|error| error.to_string())
     })
 }
 
