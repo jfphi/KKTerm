@@ -2971,6 +2971,13 @@
   text-align: center;
 }
 
+.settings-search-target-highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px var(--accent-soft);
+  scroll-margin-block: 24px;
+}
+
 /* macOS-style colored icon chip per nav section. */
 .settings-nav-icon {
   display: inline-flex;

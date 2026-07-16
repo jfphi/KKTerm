@@ -197,7 +197,39 @@ function normalizeSearchText(value: string) {
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLocaleLowerCase()
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+export function settingsSearchDisplayLabel(value: string) {
+  return value
+    .replace(/{{[^}]+}}/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[\s:：,，;；-]+$/u, "")
+    .trim();
+}
+
+export function settingsSearchTextMatchScore(template: string, candidate: string) {
+  const normalizedTemplate = normalizeSearchText(template);
+  const normalizedCandidate = normalizeSearchText(candidate);
+  if (!normalizedTemplate || !normalizedCandidate) {
+    return 0;
+  }
+  if (normalizedCandidate === normalizedTemplate) {
+    return 3;
+  }
+  if (!normalizedTemplate.includes("{{") && normalizedCandidate.includes(normalizedTemplate)) {
+    return 2;
+  }
+
+  const stableFragments = template
+    .split(/{{[^}]+}}/g)
+    .map(normalizeSearchText)
+    .filter(Boolean);
+  return stableFragments.length > 0 &&
+    stableFragments.every((fragment) => normalizedCandidate.includes(fragment))
+    ? 1
+    : 0;
 }
 
 export function buildSettingsSearchResults({
@@ -231,19 +263,19 @@ export function buildSettingsSearchResults({
       keys.indexOf(key) === index && translate(key, "en") !== key,
     );
     const matches = searchKeys.flatMap((key) => {
-      const label = translate(key, activeLanguage);
+      const localizedLabel = translate(key, activeLanguage);
       const englishLabel = translate(key, "en");
-      const normalizedLabel = normalizeSearchText(label);
+      const normalizedLabel = normalizeSearchText(localizedLabel);
       if (
         seenLabels.has(normalizedLabel) ||
-        ![label, englishLabel].some((value) =>
+        ![localizedLabel, englishLabel].some((value) =>
           normalizeSearchText(value).includes(normalizedQuery),
         )
       ) {
         return [];
       }
       seenLabels.add(normalizedLabel);
-      return [{ key, label }];
+      return [{ key, label: settingsSearchDisplayLabel(localizedLabel) }];
     });
 
     if (!sectionMatches && matches.length === 0) {
