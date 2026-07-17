@@ -493,6 +493,10 @@ fn winget_cli_fallback_command(tool_id: &str) -> Option<(&'static str, &'static 
     match tool_id {
         "oh-my-posh" => Some(("oh-my-posh", &["version"])),
         "powershell-7" => Some(("pwsh", &["--version"])),
+        // Astral's standalone install.ps1 drops `uv` on PATH (typically
+        // `%USERPROFILE%\.local\bin`) without an Add/Remove Programs entry, so
+        // registry detection alone misses script-installed copies.
+        "uv" => Some(("uv", &["--version"])),
         _ => None,
     }
 }
@@ -512,10 +516,20 @@ fn parse_version_line(text: &str) -> Option<String> {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(|line| {
-            line.trim_start_matches("Python ")
-                .trim_start_matches('v')
-                .to_string()
+            let trimmed = line
+                .trim_start_matches("Python ")
+                .trim_start_matches('v');
+            // Prefer the first version-shaped token so lines like
+            // `uv 0.11.29 (hash date)` and `PowerShell 7.5.0` compare cleanly
+            // against winget/latest-version strings.
+            extract_first_version_token(trimmed).unwrap_or_else(|| trimmed.to_string())
         })
+}
+
+fn extract_first_version_token(text: &str) -> Option<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+        .find(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|part| part.to_string())
 }
 
 fn command_output_with_refreshed_path(program: &str, args: &[&str]) -> Option<Output> {
@@ -1336,6 +1350,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_version_line_extracts_uv_cli_version() {
+        assert_eq!(
+            parse_version_line("uv 0.11.29 (be17d132a 2026-03-18)\n").as_deref(),
+            Some("0.11.29")
+        );
+        assert_eq!(
+            parse_version_line("PowerShell 7.5.0\n").as_deref(),
+            Some("7.5.0")
+        );
+    }
+
+    #[test]
     fn oh_my_posh_has_cli_detection_fallback() {
         assert_eq!(
             winget_cli_fallback_command("oh-my-posh"),
@@ -1349,6 +1375,14 @@ mod tests {
         assert_eq!(
             winget_cli_fallback_command("powershell-7"),
             Some(("pwsh", &["--version"][..]))
+        );
+    }
+
+    #[test]
+    fn uv_has_cli_detection_fallback() {
+        assert_eq!(
+            winget_cli_fallback_command("uv"),
+            Some(("uv", &["--version"][..]))
         );
     }
 

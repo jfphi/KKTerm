@@ -2495,7 +2495,33 @@ fn refreshed_path_extras(vars: &BTreeMap<String, String>) -> Vec<String> {
     {
         extras.push(dir.to_string_lossy().to_string());
     }
+    // Astral's standalone uv installer defaults to `%USERPROFILE%\.local\bin`.
+    // Keep that directory visible to refreshed PATH probes even when the
+    // current KKTerm process still has a stale PATH snapshot.
+    for dir in standalone_uv_bin_path_candidates()
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+    {
+        extras.push(dir.to_string_lossy().to_string());
+    }
     extras
+}
+
+fn standalone_uv_bin_path_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(user_profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        candidates.push(user_profile.join(".local").join("bin"));
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let home_local_bin = home.join(".local").join("bin");
+        if !candidates
+            .iter()
+            .any(|existing| existing == &home_local_bin)
+        {
+            candidates.push(home_local_bin);
+        }
+    }
+    candidates
 }
 
 fn git_cmd_path_candidates() -> Vec<PathBuf> {
@@ -3269,6 +3295,17 @@ mod tests {
         assert!(!winget_tool_should_add_links_to_path("bruno"));
         assert!(!winget_tool_should_add_links_to_path("vscode"));
         assert!(!winget_tool_should_add_links_to_path("git"));
+    }
+
+    #[test]
+    fn standalone_uv_bin_path_includes_user_local_bin() {
+        let candidates = standalone_uv_bin_path_candidates();
+        assert!(
+            candidates
+                .iter()
+                .any(|path| path.ends_with(std::path::Path::new(".local").join("bin"))),
+            "expected %USERPROFILE%\\.local\\bin among {candidates:?}"
+        );
     }
 
     #[test]
