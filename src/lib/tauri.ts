@@ -833,6 +833,12 @@ export interface WebviewCaptureCredentialRequest extends WebviewSimpleRequest {
   nonce: string;
 }
 
+export interface WebviewPageCaptureStateRequest extends WebviewSimpleRequest {
+  nonce: string;
+  x?: number;
+  y?: number;
+}
+
 export interface FillWebviewCredentialRequest {
   sessionId: string;
   connectionId: string;
@@ -2034,6 +2040,10 @@ type CommandMap = {
     args: { request: CaptureScreenshotRequest };
     result: null;
   };
+  write_screenshot_data_url_to_clipboard: {
+    args: { request: { dataUrl: string } };
+    result: null;
+  };
   capture_screenshot_for_assistant: {
     args: { request: CaptureScreenshotRequest };
     result: AssistantScreenshot;
@@ -2958,6 +2968,10 @@ type CommandMap = {
   };
   capture_webview_credential: {
     args: { request: WebviewCaptureCredentialRequest };
+    result: null;
+  };
+  request_webview_page_capture_state: {
+    args: { request: WebviewPageCaptureStateRequest };
     result: null;
   };
   close_webview_session: {
@@ -4003,6 +4017,31 @@ export async function pickAndSaveFile(
   if (typeof path !== "string" || !path) return null;
   await writeFile(path, bytes);
   return path;
+}
+
+export async function selectPngSavePath(defaultFilename: string, title: string) {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const path = await saveDialog({
+    defaultPath: defaultFilename,
+    filters: [{ name: "PNG", extensions: ["png"] }],
+    title,
+  });
+  return typeof path === "string" && path ? path : null;
+}
+
+export async function writeDataUrlFile(path: string, dataUrl: string) {
+  const encoded = dataUrl.split(",", 2)[1];
+  if (!encoded || !dataUrl.startsWith("data:")) {
+    throw new Error("The generated file data is invalid.");
+  }
+  const binary = window.atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  await writeFile(path, bytes);
 }
 
 export async function selectScreenshotFolder(options: {

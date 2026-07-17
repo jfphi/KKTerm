@@ -19,6 +19,12 @@ pub struct CaptureScreenshotRequest {
     height: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotDataUrlRequest {
+    data_url: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssistantScreenshot {
@@ -71,6 +77,31 @@ pub fn capture_rect_to_clipboard(
         target.height,
         use_directx,
     )
+}
+
+#[cfg(target_os = "windows")]
+pub fn write_data_url_to_clipboard(
+    app: &tauri::AppHandle,
+    request: ScreenshotDataUrlRequest,
+) -> Result<(), String> {
+    let (_, encoded) = request
+        .data_url
+        .split_once(",")
+        .filter(|(header, _)| header.starts_with("data:image/") && header.ends_with(";base64"))
+        .ok_or_else(|| "stitched screenshot is not a base64 image data URL".to_string())?;
+    let bytes = STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("failed to decode stitched screenshot: {error}"))?;
+    let image = image::load_from_memory(&bytes)
+        .map_err(|error| format!("failed to read stitched screenshot: {error}"))?
+        .to_rgba8();
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("failed to resolve window handle: {error}"))?;
+    platform::write_rgba_to_clipboard(hwnd.0, image.as_raw(), image.width(), image.height())
 }
 
 #[cfg(target_os = "windows")]
@@ -308,6 +339,14 @@ pub fn capture_rect_to_clipboard(
     _use_directx: bool,
 ) -> Result<(), String> {
     Err("screenshot capture is currently available on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn write_data_url_to_clipboard(
+    _app: &tauri::AppHandle,
+    _request: ScreenshotDataUrlRequest,
+) -> Result<(), String> {
+    Err("screenshot clipboard is currently available on Windows".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1032,6 +1071,37 @@ mod platform {
         use_directx: bool,
     ) -> Result<(), String> {
         let dib = capture_screen_rect_to_dib(x, y, width, height, use_directx)?;
+        unsafe { write_dib_to_clipboard(owner_hwnd, &dib) }
+    }
+
+    pub fn write_rgba_to_clipboard(
+        owner_hwnd: HWND,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let expected = width as usize * height as usize * 4;
+        if width == 0 || height == 0 || rgba.len() < expected {
+            return Err("stitched screenshot image data is incomplete".to_string());
+        }
+        let header_size = mem::size_of::<BITMAPINFOHEADER>();
+        let mut dib = vec![0u8; header_size + expected];
+        unsafe {
+            let header = dib.as_mut_ptr() as *mut BITMAPINFOHEADER;
+            (*header).biSize = header_size as u32;
+            (*header).biWidth = width as i32;
+            (*header).biHeight = -(height as i32);
+            (*header).biPlanes = 1;
+            (*header).biBitCount = 32;
+            (*header).biCompression = BI_RGB;
+            (*header).biSizeImage = expected as u32;
+        }
+        for (source, target) in rgba[..expected]
+            .chunks_exact(4)
+            .zip(dib[header_size..].chunks_exact_mut(4))
+        {
+            target.copy_from_slice(&[source[2], source[1], source[0], source[3]]);
+        }
         unsafe { write_dib_to_clipboard(owner_hwnd, &dib) }
     }
 

@@ -2448,7 +2448,6 @@
       },
       "options": [
         "provider",
-        "scope",
         "version"
       ],
       "descriptionLocales": {
@@ -2498,7 +2497,6 @@
       },
       "options": [
         "provider",
-        "scope",
         "version"
       ],
       "descriptionLocales": {

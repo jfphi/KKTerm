@@ -1756,6 +1756,17 @@ async fn capture_screenshot_to_clipboard(
 }
 
 #[tauri::command]
+async fn write_screenshot_data_url_to_clipboard(
+    app: tauri::AppHandle,
+    request: screenshot::ScreenshotDataUrlRequest,
+) -> Result<(), String> {
+    run_blocking_screenshot_command("stitched screenshot clipboard write", move || {
+        screenshot::write_data_url_to_clipboard(&app, request)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn capture_screenshot_for_assistant(
     app: tauri::AppHandle,
     request: screenshot::CaptureScreenshotRequest,
@@ -3360,6 +3371,14 @@ fn capture_webview_credential(
 }
 
 #[tauri::command]
+fn request_webview_page_capture_state(
+    webviews: tauri::State<'_, webview::WebviewSessionManager>,
+    request: webview::WebviewPageCaptureStateRequest,
+) -> Result<(), String> {
+    webviews.request_page_capture_state(request)
+}
+
+#[tauri::command]
 fn close_webview_session(
     webviews: tauri::State<'_, webview::WebviewSessionManager>,
     request: webview::WebviewSimpleRequest,
@@ -4118,6 +4137,7 @@ pub fn run() {
             update_tray_menu,
             // ── Screenshots
             capture_screenshot_to_clipboard,
+            write_screenshot_data_url_to_clipboard,
             capture_screenshot_for_assistant,
             capture_fullscreen_screenshot_for_assistant,
             capture_screenshot_to_library,
@@ -4276,6 +4296,7 @@ pub fn run() {
             webview_go_forward,
             fill_webview_credential,
             capture_webview_credential,
+            request_webview_page_capture_state,
             close_webview_session,
             // ── RDP
             start_rdp_session,
