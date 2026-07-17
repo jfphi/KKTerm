@@ -830,6 +830,47 @@
       }
     },
     {
+      "id": "cursor-cli",
+      "name": "Cursor Agent CLI",
+      "section": "aiAgents",
+      "descriptionEn": "Cursor Agent CLI (cursor-agent / agent). Ships with Cursor; also installable from cursor.com/cli.",
+      "category": "ai",
+      "icon": "Bot",
+      "homepage": "https://cursor.com/cli",
+      "needs": [
+        "winget"
+      ],
+      "provider": {
+        "kind": "winget",
+        "id": "Anysphere.Cursor"
+      },
+      "downloadProvider": {
+        "kind": "downloadInstaller",
+        "url": "https://downloads.cursor.com/production/e7a7e93f4d75f8272503ecf33cedbaae10114a15/win32/x64/user-setup/CursorUserSetup-x64-3.6.21.exe",
+        "fileName": "CursorUserSetup-x64-3.6.21.exe"
+      },
+      "options": [
+        "provider",
+        "scope",
+        "version"
+      ],
+      "descriptionLocales": {
+        "zh-TW": "Cursor Agent CLI（cursor-agent / agent）。隨 Cursor 安裝提供，也可從 cursor.com/cli 安裝。",
+        "zh-CN": "Cursor Agent CLI（cursor-agent / agent）。随 Cursor 安装提供，也可从 cursor.com/cli 安装。",
+        "ja": "Cursor Agent CLI（cursor-agent / agent）。Cursor に同梱され、cursor.com/cli からもインストールできます。",
+        "ko": "Cursor Agent CLI(cursor-agent / agent). Cursor와 함께 제공되며 cursor.com/cli에서도 설치할 수 있습니다.",
+        "de": "Cursor Agent CLI (cursor-agent / agent). Wird mit Cursor geliefert; auch unter cursor.com/cli installierbar.",
+        "fr": "Cursor Agent CLI (cursor-agent / agent). Fourni avec Cursor ; également installable depuis cursor.com/cli.",
+        "es": "Cursor Agent CLI (cursor-agent / agent). Se incluye con Cursor; también se puede instalar desde cursor.com/cli.",
+        "es-MX": "Cursor Agent CLI (cursor-agent / agent). Se incluye con Cursor; también se puede instalar desde cursor.com/cli.",
+        "pt-BR": "Cursor Agent CLI (cursor-agent / agent). Vem com o Cursor; também instalável em cursor.com/cli.",
+        "it": "Cursor Agent CLI (cursor-agent / agent). Incluso con Cursor; installabile anche da cursor.com/cli.",
+        "vi": "Cursor Agent CLI (cursor-agent / agent). Đi kèm Cursor; cũng có thể cài từ cursor.com/cli.",
+        "th": "Cursor Agent CLI (cursor-agent / agent) มาพร้อม Cursor และติดตั้งได้จาก cursor.com/cli",
+        "id": "Cursor Agent CLI (cursor-agent / agent). Menyertai Cursor; juga dapat dipasang dari cursor.com/cli."
+      }
+    },
+    {
       "id": "antigravity-cli",
       "name": "Antigravity CLI",
       "section": "aiAgents",

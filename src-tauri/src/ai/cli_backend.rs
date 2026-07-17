@@ -172,16 +172,18 @@ pub(crate) struct AcpRunFailure {
 
 pub(crate) fn run_acp_agent_command(
     backend: AiCliBackendKind,
+    cli_command: &str,
     model: &str,
     prompt: &str,
     app: &tauri::AppHandle,
     settings: &AiProviderSettings,
 ) -> Result<String, AcpRunFailure> {
-    run_acp_agent_command_streaming(backend, model, prompt, None, app, settings)
+    run_acp_agent_command_streaming(backend, cli_command, model, prompt, None, app, settings)
 }
 
 pub(crate) fn run_acp_agent_command_streaming(
     backend: AiCliBackendKind,
+    cli_command: &str,
     model: &str,
     prompt: &str,
     channel: Option<&Channel<Value>>,
@@ -191,6 +193,7 @@ pub(crate) fn run_acp_agent_command_streaming(
     let mut prompt_started = false;
     run_acp_agent_turn(
         backend,
+        cli_command,
         model,
         prompt,
         channel,
@@ -206,6 +209,7 @@ pub(crate) fn run_acp_agent_command_streaming(
 
 fn run_acp_agent_turn(
     backend: AiCliBackendKind,
+    cli_command: &str,
     model: &str,
     prompt: &str,
     channel: Option<&Channel<Value>>,
@@ -213,7 +217,7 @@ fn run_acp_agent_turn(
     settings: &AiProviderSettings,
     prompt_started: &mut bool,
 ) -> Result<String, String> {
-    let spec = acp_command_spec(backend);
+    let spec = acp_command_spec(backend, cli_command);
     let cwd = app
         .path()
         .app_data_dir()
@@ -549,7 +553,7 @@ pub(crate) fn acp_content_text(content: &Value) -> Option<String> {
     None
 }
 
-pub(crate) fn acp_command_spec(backend: AiCliBackendKind) -> AcpCommandSpec {
+pub(crate) fn acp_command_spec(backend: AiCliBackendKind, cli_command: &str) -> AcpCommandSpec {
     match backend {
         AiCliBackendKind::Codex => AcpCommandSpec {
             program: npx_command(),
@@ -566,6 +570,12 @@ pub(crate) fn acp_command_spec(backend: AiCliBackendKind) -> AcpCommandSpec {
                 "@agentclientprotocol/claude-agent-acp@0.40.0".to_string(),
             ],
             label: "Claude ACP",
+        },
+        // Cursor ships a native ACP stdio server (`agent acp` / `cursor-agent acp`).
+        AiCliBackendKind::Cursor => AcpCommandSpec {
+            program: cli_command.to_string(),
+            args: vec!["acp".to_string()],
+            label: "Cursor ACP",
         },
     }
 }
@@ -604,6 +614,7 @@ pub fn open_ai_cli_backend_auth(
     let auth_command = match provider {
         AiCliBackendKind::Codex => format!("{} login", shell_quote(&command)),
         AiCliBackendKind::ClaudeCode => format!("{} auth login", shell_quote(&command)),
+        AiCliBackendKind::Cursor => format!("{} login", shell_quote(&command)),
     };
     spawn_external_terminal(&auth_command)
 }
@@ -612,6 +623,8 @@ pub(crate) fn default_cli_command(provider: AiCliBackendKind) -> &'static str {
     match provider {
         AiCliBackendKind::Codex => "codex",
         AiCliBackendKind::ClaudeCode => "claude",
+        // Prefer the Open Design / npm-shim name; discovery also tries `agent`.
+        AiCliBackendKind::Cursor => "cursor-agent",
     }
 }
 
@@ -652,7 +665,7 @@ pub(crate) fn cli_backend_discovery_candidates(provider: AiCliBackendKind) -> Ve
         common_user_bin_candidates(cli_backend_command_names(provider)),
         match provider {
             AiCliBackendKind::Codex => codex_vscode_extension_candidates(),
-            AiCliBackendKind::ClaudeCode => Vec::new(),
+            AiCliBackendKind::ClaudeCode | AiCliBackendKind::Cursor => Vec::new(),
         },
     )
 }
@@ -679,6 +692,16 @@ pub(crate) fn cli_backend_command_names(provider: AiCliBackendKind) -> &'static 
         AiCliBackendKind::ClaudeCode => &["claude.exe", "claude.cmd"],
         #[cfg(not(target_os = "windows"))]
         AiCliBackendKind::ClaudeCode => &["claude"],
+        // Open Design uses `cursor-agent`; Cursor docs expose `agent` (often ~/.local/bin/agent).
+        #[cfg(target_os = "windows")]
+        AiCliBackendKind::Cursor => &[
+            "cursor-agent.exe",
+            "cursor-agent.cmd",
+            "agent.exe",
+            "agent.cmd",
+        ],
+        #[cfg(not(target_os = "windows"))]
+        AiCliBackendKind::Cursor => &["cursor-agent", "agent"],
     }
 }
 
@@ -800,6 +823,15 @@ pub(crate) fn cli_backend_status(
                         false
                     })
             }
+            // Open Design's cursorAgentDef uses `status` as a cheap auth probe.
+            AiCliBackendKind::Cursor => {
+                run_cli_capture(&command, &["status"], Some(Duration::from_secs(20)))
+                    .map(|output| cursor_auth_status_logged_in(&output))
+                    .unwrap_or_else(|message| {
+                        error = Some(message);
+                        false
+                    })
+            }
         }
     } else {
         false
@@ -826,6 +858,18 @@ pub(crate) fn claude_auth_status_logged_in(output: &str) -> bool {
             .unwrap_or(true),
         Err(_) => true,
     }
+}
+
+/// `cursor-agent status` / `agent status` output is not a stable machine schema.
+/// Treat clear "not logged in" phrases as unauthenticated; otherwise accept a
+/// successful status probe (aligned with Open Design's authProbe opt-in).
+pub(crate) fn cursor_auth_status_logged_in(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    !(lower.contains("not logged")
+        || lower.contains("logged out")
+        || lower.contains("unauthenticated")
+        || (lower.contains("please run") && lower.contains("login"))
+        || lower.contains("authentication required"))
 }
 
 pub(crate) fn run_cli_agent_command(
@@ -887,6 +931,7 @@ pub(crate) fn run_cli_agent_command(
             match backend {
                 AiCliBackendKind::Codex => "Codex CLI",
                 AiCliBackendKind::ClaudeCode => "Claude Code CLI",
+                AiCliBackendKind::Cursor => "Cursor Agent CLI",
             }
         ));
     }
@@ -939,6 +984,26 @@ pub(crate) fn cli_agent_invocation(
             stdin: Some(prompt.to_string()),
             prompt_delivery: "stdin",
         },
+        // Aligned with Open Design cursorAgentDef: --print + stdin prompt.
+        // Do not pass `-` as an argv sentinel (Cursor treats it as the prompt).
+        // Use text output for one-shot capture; skip --trust (old builds reject it).
+        AiCliBackendKind::Cursor => {
+            let mut args = vec![
+                "--print".to_string(),
+                "--output-format".to_string(),
+                "text".to_string(),
+                "--force".to_string(),
+            ];
+            if !model.is_empty() && model != "default" && model != "auto" {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
+            CliAgentInvocation {
+                args,
+                stdin: Some(prompt.to_string()),
+                prompt_delivery: "stdin",
+            }
+        }
     }
 }
 
