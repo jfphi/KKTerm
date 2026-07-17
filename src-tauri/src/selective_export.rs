@@ -292,7 +292,7 @@ pub async fn export_selective_database(
     include_credentials: bool,
     passphrase: Option<String>,
 ) -> Result<SelectiveExportInfo, String> {
-    crate::run_blocking_command("selective database export", move || {
+    crate::run_blocking_database_command("selective database export", move || {
         export_selective_database_sync(&app, path, segments, include_credentials, passphrase)
     })
     .await
@@ -488,7 +488,7 @@ pub async fn import_selective_database(
     actions: HashMap<String, String>,
     passphrase: Option<String>,
 ) -> Result<SelectiveImportResult, String> {
-    crate::run_blocking_command("selective database import", move || {
+    crate::run_blocking_database_command("selective database import", move || {
         import_selective_database_sync(&app, path, actions, passphrase)
     })
     .await

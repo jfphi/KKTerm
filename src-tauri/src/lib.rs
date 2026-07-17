@@ -876,7 +876,7 @@ async fn import_settings_database(
 ) -> Result<storage::ImportedDatabaseSnapshot, String> {
     let worker_app = app.clone();
     let (snapshot, general_settings, credential_settings) =
-        run_blocking_command("settings database import", move || {
+        run_blocking_database_command("settings database import", move || {
             let storage = worker_app.state::<storage::Storage>();
             let snapshot = storage.import_database_zip(path.into())?;
             let general_settings = storage.general_settings()?;
@@ -910,7 +910,7 @@ async fn export_settings_database(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<storage::DatabaseBackupInfo, String> {
-    run_blocking_command("settings database export", move || {
+    run_blocking_database_command("settings database export", move || {
         app.state::<storage::Storage>().export_database(path.into())
     })
     .await
@@ -2630,6 +2630,26 @@ where
 {
     run_blocking_command(label, move || {
         let _guard = SCREENSHOT_COMMAND_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        job()
+    })
+    .await
+}
+
+// Full and selective settings-database import/export share the live SQLite
+// file, its backup folder, and second-resolution temp snapshot paths; the
+// multi-step replace/backup sequences are only safe when whole commands cannot
+// overlap.
+static SETTINGS_DATABASE_COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+async fn run_blocking_database_command<T, F>(label: &'static str, job: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    run_blocking_command(label, move || {
+        let _guard = SETTINGS_DATABASE_COMMAND_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         job()

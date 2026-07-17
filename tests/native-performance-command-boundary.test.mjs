@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [source, itOpsCommandsSource, selectiveExportSource, sftpWorkspaceSource] = await Promise.all([
+const [source, itOpsCommandsSource, selectiveExportSource, xServerSource, sftpWorkspaceSource] = await Promise.all([
   readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
   readFile(new URL("../src-tauri/src/itops/commands.rs", import.meta.url), "utf8"),
   readFile(new URL("../src-tauri/src/selective_export.rs", import.meta.url), "utf8"),
+  readFile(new URL("../src-tauri/src/x_server.rs", import.meta.url), "utf8"),
   readFile(
     new URL(
       "../src/modules/workspace/connections/sftp/SftpWorkspace.tsx",
@@ -81,7 +82,7 @@ test("known expensive filesystem, archive, image, and process commands use block
   for (const name of commands) {
     assert.match(
       asyncCommandSource(source, name),
-      /run_blocking_(?:screenshot_)?command\(/,
+      /run_blocking_(?:screenshot_|database_)?command\(/,
       name,
     );
   }
@@ -103,7 +104,44 @@ test("selective database archive and cryptography commands use blocking workers"
     "inspect_selective_database",
     "import_selective_database",
   ]) {
-    assert.match(asyncCommandSource(selectiveExportSource, name), /run_blocking_command\(/, name);
+    assert.match(
+      asyncCommandSource(selectiveExportSource, name),
+      /run_blocking_(?:database_)?command\(/,
+      name,
+    );
+  }
+});
+
+test("settings-database import and export stay serialized after moving to workers", () => {
+  const helper = source.slice(
+    source.indexOf("static SETTINGS_DATABASE_COMMAND_LOCK"),
+    source.indexOf("async fn start_sftp_session"),
+  );
+  assert.match(helper, /std::sync::Mutex::new\(\(\)\)/);
+  assert.match(helper, /SETTINGS_DATABASE_COMMAND_LOCK\s+\.lock\(\)/);
+  assert.match(helper, /run_blocking_command\(label/);
+
+  for (const [file, name] of [
+    [source, "import_settings_database"],
+    [source, "export_settings_database"],
+    [selectiveExportSource, "export_selective_database"],
+    [selectiveExportSource, "import_selective_database"],
+  ]) {
+    assert.match(asyncCommandSource(file, name), /run_blocking_database_command\(/, name);
+  }
+});
+
+test("X server launch keeps its check-then-spawn sequence serialized", () => {
+  assert.match(xServerSource, /static VCXSRV_CONTROL_LOCK: std::sync::Mutex<\(\)>/);
+  for (const entryPoint of [
+    "pub fn launch_vcxsrv_if_needed(",
+    "pub fn restart_vcxsrv(",
+    "pub fn stop_vcxsrv(",
+  ]) {
+    const start = xServerSource.indexOf(entryPoint);
+    assert.notEqual(start, -1, entryPoint);
+    const body = xServerSource.slice(start, xServerSource.indexOf("\npub fn ", start + 1));
+    assert.match(body, /let _guard = control_lock\(\);/, entryPoint);
   }
 });
 
