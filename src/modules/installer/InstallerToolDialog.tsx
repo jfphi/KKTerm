@@ -44,14 +44,15 @@ import {
   latestVersionWebUrlForRecipe,
   recipeSupportsLatestVersion,
 } from "./latestSupport";
-import type {
-  DetectedState,
-  InstallOptions,
-  ManagedWebUiStatus,
-  Provider,
-  QuickLaunchEntry,
-  Recipe,
-  RecipeOption,
+import {
+  isOfficialScriptInstall,
+  type DetectedState,
+  type InstallOptions,
+  type ManagedWebUiStatus,
+  type Provider,
+  type QuickLaunchEntry,
+  type Recipe,
+  type RecipeOption,
 } from "./types";
 import type { CreateConnectionRequest } from "../../types";
 
@@ -136,8 +137,11 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
   const latest = toolState?.latestVersionSeen ?? null;
   const supportsLatestVersion = recipeSupportsLatestVersion(recipe);
   const latestWebUrl = latestVersionWebUrlForRecipe(recipe);
+  const officialScript = isOfficialScriptInstall(detected);
   const hasUpdate =
-    supportsLatestVersion && isInstallerUpdateAvailable(latest, version);
+    !officialScript &&
+    supportsLatestVersion &&
+    isInstallerUpdateAvailable(latest, version);
   const webUi = webUiAffordanceForRecipe(recipe);
   const hasWebUi = webUi !== null;
   const service = serviceAffordanceForRecipe(recipe);
@@ -423,9 +427,11 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             </Row>
           ) : null}
           <Row label={t("installer.dialog.provider")}>
-            {providerSummary(installedProvider)}
+            {officialScript
+              ? t("installer.dialog.providerOfficialScript")
+              : providerSummary(installedProvider)}
           </Row>
-          {installMode ? (
+          {installMode && !officialScript ? (
             <Row label={t("installer.options.scope")}>
               {installModeLabel(installMode, t)}
             </Row>
@@ -435,7 +441,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
               {version}
             </Row>
           ) : null}
-          {supportsLatestVersion ? (
+          {!officialScript && supportsLatestVersion ? (
             <Row label={t("installer.dialog.latestVersion")}>
               <LatestVersionValue
                 error={latestError}
@@ -444,12 +450,12 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
                 onRefresh={() => void handleRefreshLatest()}
               />
             </Row>
-          ) : latestWebUrl ? (
+          ) : !officialScript && latestWebUrl ? (
             <Row label={t("installer.dialog.latestVersion")}>
               <ExternalLink href={latestWebUrl}>{t("installer.status.web")}</ExternalLink>
             </Row>
           ) : null}
-          {supportsLatestVersion && toolState?.lastCheckAt ? (
+          {!officialScript && supportsLatestVersion && toolState?.lastCheckAt ? (
             <Row label={t("installer.dialog.lastChecked")}>
               {formatTimestamp(toolState.lastCheckAt)}
             </Row>
@@ -550,7 +556,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             </ul>
           </div>
         ) : null}
-        {supportsLatestVersion ? (
+        {supportsLatestVersion && !officialScript ? (
           <label className="installer-tool-dialog__pin">
             <span>{t("installer.options.pinVersion")}</span>
             <ToggleSwitch

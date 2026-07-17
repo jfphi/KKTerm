@@ -10,7 +10,12 @@
 import { useInstallerStore } from "./state";
 import { recipeSupportsLatestVersion } from "./latestSupport";
 import { isInstallerUpdateAvailable } from "./versionCompare";
-import type { DetectedState, Recipe, ToolState } from "./types";
+import {
+  isOfficialScriptInstall,
+  type DetectedState,
+  type Recipe,
+  type ToolState,
+} from "./types";
 
 export type StatusTone =
   | "installed"
@@ -55,6 +60,7 @@ export function deriveToolStatus(
   const latestSeen = inputs.toolState?.latestVersionSeen;
   const supportsLatestVersion = recipeSupportsLatestVersion(recipe);
   const hasUpdate =
+    !isOfficialScriptInstall(inputs.detected) &&
     supportsLatestVersion &&
     isInstalled &&
     isInstallerUpdateAvailable(latestSeen, installedVersion);

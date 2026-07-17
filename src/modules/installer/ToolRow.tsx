@@ -12,7 +12,11 @@ import { iconUrlForRecipe, FALLBACK_ICON_URL } from "./icons";
 import { launchKindForRecipe } from "./launch";
 import { useInstallerStore } from "./state";
 import { useToolStatus } from "./useToolStatus";
-import { localizedDescription, type Recipe } from "./types";
+import {
+  isOfficialScriptInstall,
+  localizedDescription,
+  type Recipe,
+} from "./types";
 
 export function ToolRow({ recipe }: { recipe: Recipe }) {
   const { t, i18n } = useTranslation();
@@ -22,6 +26,8 @@ export function ToolRow({ recipe }: { recipe: Recipe }) {
   const showStatusBarNotice = useWorkspaceStore(
     (state) => state.showStatusBarNotice,
   );
+  const detected = useInstallerStore((s) => s.detected[recipe.id]);
+  const officialScript = isOfficialScriptInstall(detected);
 
   const {
     isInstalled,
@@ -86,10 +92,15 @@ export function ToolRow({ recipe }: { recipe: Recipe }) {
         ? t("installer.status.installing")
         : t("installer.status.uninstalling")
       : partial
-        ? t("installer.status.partial", {
-            installed: partial[0],
-            total: partial[1],
-          })
+        ? officialScript
+          ? t("installer.status.partialOfficialScript", {
+              installed: partial[0],
+              total: partial[1],
+            })
+          : t("installer.status.partial", {
+              installed: partial[0],
+              total: partial[1],
+            })
         : hasUpdate && installedVersion && latestSeen
           ? `${installedVersion} -> ${latestSeen}`
           : latestError ?? installedDisplayText;
@@ -104,14 +115,21 @@ export function ToolRow({ recipe }: { recipe: Recipe }) {
       ? t("installer.status.installing")
       : t("installer.status.uninstalling")
     : partial
-      ? t("installer.status.partial", {
-          installed: partial[0],
-          total: partial[1],
-        })
+      ? officialScript
+        ? t("installer.status.partialOfficialScript", {
+            installed: partial[0],
+            total: partial[1],
+          })
+        : t("installer.status.partial", {
+            installed: partial[0],
+            total: partial[1],
+          })
       : hasUpdate
         ? t("installer.actions.update")
         : isInstalled
-          ? t("installer.section.installed")
+          ? officialScript
+            ? t("installer.status.installedOfficialScript")
+            : t("installer.section.installed")
           : t("installer.status.notInstalled");
   const description = localizedDescription(recipe, i18n.language);
 

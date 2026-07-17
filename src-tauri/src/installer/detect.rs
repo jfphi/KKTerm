@@ -210,7 +210,9 @@ pub fn detect_one(recipe: &Recipe) -> DetectedState {
                 } else if !state.installed
                     && let Some(cli_state) = detect_winget_cli_fallback(&recipe.id)
                 {
-                    cli_state.with_install_provider(Some("winget"))
+                    cli_state.with_install_provider(Some(
+                        winget_cli_fallback_install_provider(&recipe.id),
+                    ))
                 } else if !state.installed
                     && matches!(
                         &recipe.download_provider,
@@ -338,6 +340,9 @@ fn runtime_bundle_detected_state(
     if !manager_installed {
         return default_bundle_detected_state(child_states, child_states.len() as u32);
     }
+    let manager_provider = child_states
+        .first()
+        .and_then(|state| state.install_provider.clone());
     match detect_runtime_version() {
         Some(version) => {
             let manager_version = child_states
@@ -345,6 +350,7 @@ fn runtime_bundle_detected_state(
                 .and_then(|state| state.installed_version.clone());
             let mut state = DetectedState::installed(manager_version);
             state.runtime_version = Some(version);
+            state.install_provider = manager_provider;
             state
         }
         None => DetectedState {
@@ -354,7 +360,7 @@ fn runtime_bundle_detected_state(
             install_location: None,
             install_scope: None,
             runtime_version: None,
-            install_provider: None,
+            install_provider: manager_provider,
             last_checked_at: None,
         },
     }
@@ -498,6 +504,15 @@ fn winget_cli_fallback_command(tool_id: &str) -> Option<(&'static str, &'static 
         // registry detection alone misses script-installed copies.
         "uv" => Some(("uv", &["--version"])),
         _ => None,
+    }
+}
+
+/// Provider marker for CLI-fallback detections. Astral's standalone uv
+/// installer is not WinGet-managed, so updates must stay disabled in the UI.
+fn winget_cli_fallback_install_provider(tool_id: &str) -> &'static str {
+    match tool_id {
+        "uv" => "officialScript",
+        _ => "winget",
     }
 }
 
@@ -1384,6 +1399,29 @@ mod tests {
             winget_cli_fallback_command("uv"),
             Some(("uv", &["--version"][..]))
         );
+    }
+
+    #[test]
+    fn uv_cli_fallback_marks_official_script_provider() {
+        assert_eq!(
+            winget_cli_fallback_install_provider("uv"),
+            "officialScript"
+        );
+        assert_eq!(
+            winget_cli_fallback_install_provider("oh-my-posh"),
+            "winget"
+        );
+    }
+
+    #[test]
+    fn runtime_bundle_propagates_manager_install_provider() {
+        let manager = DetectedState::installed(Some("0.11.29".into()))
+            .with_install_provider(Some("officialScript"));
+        let state = runtime_bundle_detected_state(&[&manager], || Some("3.13.5".into()));
+
+        assert!(state.installed);
+        assert_eq!(state.install_provider.as_deref(), Some("officialScript"));
+        assert_eq!(state.runtime_version.as_deref(), Some("3.13.5"));
     }
 
     #[test]
