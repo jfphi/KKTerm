@@ -11,6 +11,7 @@ import { buildIconSearchGroups, iconSearchGroupsMatch } from "../src/lib/iconSea
 const INSTALLER_ARTWORK_ICON_IDS = [
   "installer-default",
   "7zip",
+  "audacity",
   "claude-code",
   "antigravity",
   "astral",
@@ -35,6 +36,7 @@ const INSTALLER_ARTWORK_ICON_IDS = [
   "nodejs",
   "notepadpp",
   "obs-studio",
+  "obsidian",
   "ollama",
   "oh-my-posh",
   "openflowkit",

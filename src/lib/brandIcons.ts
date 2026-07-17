@@ -124,6 +124,11 @@ export const BRAND_ICON_ENTRIES: BrandIconEntry[] = [
     keywords: ["7zip", "7 zip", "archive", "compression", "file", "package"],
   },
   {
+    id: "audacity",
+    label: "Audacity",
+    keywords: ["audacity", "audio", "recording", "editor", "media"],
+  },
+  {
     id: "astral",
     label: "Astral",
     keywords: ["astral", "uv", "python", "package", "developer"],
@@ -262,6 +267,11 @@ export const BRAND_ICON_ENTRIES: BrandIconEntry[] = [
     id: "obs-studio",
     label: "OBS Studio",
     keywords: ["obs", "obs studio", "video", "recording", "streaming", "multimedia"],
+  },
+  {
+    id: "obsidian",
+    label: "Obsidian",
+    keywords: ["obsidian", "notes", "markdown", "knowledge", "document"],
   },
   {
     id: "ollama",

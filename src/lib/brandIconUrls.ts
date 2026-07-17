@@ -3,6 +3,7 @@ import defaultIcon from "../assets/installer-icons/default.svg?url";
 import sevenZipIcon from "../assets/installer-icons/7zip.svg?url";
 import anthropicIcon from "../assets/installer-icons/anthropic.svg?url";
 import antigravityIcon from "../assets/installer-icons/antigravity.svg?url";
+import audacityIcon from "../assets/installer-icons/audacity.svg?url";
 import astralIcon from "../assets/installer-icons/astral.svg?url";
 import bentoPdfIcon from "../assets/installer-icons/bentopdf.svg?url";
 import blenderIcon from "../assets/installer-icons/blender.svg?url";
@@ -33,6 +34,7 @@ import n8nIcon from "../assets/installer-icons/n8n.svg?url";
 import nodejsIcon from "../assets/installer-icons/nodedotjs.svg?url";
 import notepadppIcon from "../assets/installer-icons/notepadpp.svg?url";
 import obsStudioIcon from "../assets/installer-icons/obs-studio.svg?url";
+import obsidianIcon from "../assets/installer-icons/obsidian.svg?url";
 import ohMyPoshIcon from "../assets/installer-icons/oh-my-posh.svg?url";
 import ollamaIcon from "../assets/installer-icons/ollama.svg?url";
 import openClawIcon from "../assets/installer-icons/openclaw.png?url";
@@ -75,6 +77,7 @@ const brandIconUrlById: Record<string, string> = {
   comfyui: comfyuiIcon,
   opencode: opencodeIcon,
   cursor: cursorIcon,
+  audacity: audacityIcon,
   astral: astralIcon,
   bentopdf: bentoPdfIcon,
   blender: blenderIcon,
@@ -100,6 +103,7 @@ const brandIconUrlById: Record<string, string> = {
   nodejs: nodejsIcon,
   notepadpp: notepadppIcon,
   "obs-studio": obsStudioIcon,
+  obsidian: obsidianIcon,
   ollama: ollamaIcon,
   "oh-my-posh": ohMyPoshIcon,
   openflowkit: openFlowKitIcon,
