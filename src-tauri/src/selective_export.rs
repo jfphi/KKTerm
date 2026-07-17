@@ -27,7 +27,7 @@ use rusqlite::Connection as SqliteConnection;
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -285,14 +285,28 @@ struct EncryptedBlob {
 // ── Export ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn export_selective_database(
-    storage: State<'_, Storage>,
-    secrets: State<'_, Secrets>,
+pub async fn export_selective_database(
+    app: AppHandle,
     path: String,
     segments: Vec<String>,
     include_credentials: bool,
     passphrase: Option<String>,
 ) -> Result<SelectiveExportInfo, String> {
+    crate::run_blocking_command("selective database export", move || {
+        export_selective_database_sync(&app, path, segments, include_credentials, passphrase)
+    })
+    .await
+}
+
+fn export_selective_database_sync(
+    app: &AppHandle,
+    path: String,
+    segments: Vec<String>,
+    include_credentials: bool,
+    passphrase: Option<String>,
+) -> Result<SelectiveExportInfo, String> {
+    let storage = app.state::<Storage>();
+    let secrets = app.state::<Secrets>();
     if segments.is_empty() {
         return Err("select at least one category to export".to_string());
     }
@@ -457,22 +471,37 @@ fn collect_connection_secrets(
 // ── Inspect ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn inspect_selective_database(path: String) -> Result<SelectiveManifest, String> {
-    let (manifest, _data, _secrets) = read_bundle(Path::new(&path))?;
-    Ok(manifest)
+pub async fn inspect_selective_database(path: String) -> Result<SelectiveManifest, String> {
+    crate::run_blocking_command("selective database inspection", move || {
+        let (manifest, _data, _secrets) = read_bundle(Path::new(&path))?;
+        Ok(manifest)
+    })
+    .await
 }
 
 // ── Import ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn import_selective_database(
+pub async fn import_selective_database(
     app: AppHandle,
-    storage: State<'_, Storage>,
-    secrets: State<'_, Secrets>,
     path: String,
     actions: HashMap<String, String>,
     passphrase: Option<String>,
 ) -> Result<SelectiveImportResult, String> {
+    crate::run_blocking_command("selective database import", move || {
+        import_selective_database_sync(&app, path, actions, passphrase)
+    })
+    .await
+}
+
+fn import_selective_database_sync(
+    app: &AppHandle,
+    path: String,
+    actions: HashMap<String, String>,
+    passphrase: Option<String>,
+) -> Result<SelectiveImportResult, String> {
+    let storage = app.state::<Storage>();
+    let secrets = app.state::<Secrets>();
     let (manifest, data, secrets_blob) = read_bundle(Path::new(&path))?;
     if manifest.format != SELECTIVE_FORMAT {
         return Err(format!("unsupported bundle format {:?}", manifest.format));
@@ -545,7 +574,7 @@ pub fn import_selective_database(
     })?;
 
     if applied.iter().any(|segment| segment == "itops") {
-        crate::itops::automation_commands::reconcile_automations(&app);
+        crate::itops::automation_commands::reconcile_automations(app);
     }
 
     // Write credentials into the active backend, owner ids rewritten via remap.

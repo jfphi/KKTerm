@@ -244,6 +244,7 @@ export function SftpWorkspace({
     requestId: number;
   } | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const localDirectoryRequestRef = useRef(0);
   const transientPasswordRef = useRef<string | null>(null);
   const passwordPromptPromiseRef = useRef<Promise<string | null> | null>(null);
   const passwordPromptResolverRef = useRef<((password: string | null) => void) | null>(null);
@@ -539,6 +540,7 @@ export function SftpWorkspace({
   };
 
   const loadLocalDirectory = async (path?: string) => {
+    const requestId = ++localDirectoryRequestRef.current;
     if (!isTauriRuntime()) {
       setLocalStatus(t("sftp.tauriUnavailable"));
       setLocalFiles([]);
@@ -551,6 +553,9 @@ export function SftpWorkspace({
       const result = await invokeCommand("list_local_directory", {
         request: { path },
       });
+      if (requestId !== localDirectoryRequestRef.current) {
+        return true;
+      }
       setLocalPath(result.path);
       setLocalFiles(result.entries.map(localEntryToFileEntry));
       rememberLocalPath(result.path);
@@ -561,11 +566,16 @@ export function SftpWorkspace({
       setLocalStatus("");
       return true;
     } catch (error) {
+      if (requestId !== localDirectoryRequestRef.current) {
+        return true;
+      }
       setLocalStatus(String(error));
       setLocalFiles([]);
       return false;
     } finally {
-      setIsLocalLoading(false);
+      if (requestId === localDirectoryRequestRef.current) {
+        setIsLocalLoading(false);
+      }
     }
   };
 
