@@ -443,6 +443,13 @@ scrollable camera margin around its projected room. In either spatial view,
 drag blank floor with the left mouse button, drag with the middle button, or
 focus the room and use the arrow keys to pan. The target button below the zoom
 levels, or a middle-button click without dragging, resets the camera to center.
+While the 2.5D room is hovered or focused, entering Up, Up, Down, Down, Left,
+Right, Left, Right, B, A within three seconds triggers the decorative Server
+Room blackout: a lightning strike cuts the room lights, rack-top and floor 乖乖
+packages remain visibly green, and the rack lights recover in shuffled order.
+The effect clears itself after about eleven seconds, changes no durable or live
+operational state, ignores editable controls, and removes rapid flashing and
+flicker when the operating system requests reduced motion.
 The room background remains editable from empty elevation and 2.5D space. In
 Floor Plan mode, the opaque blueprint grid stays edge-to-edge and the saved
 room background is visible only behind the shared toolbar.
