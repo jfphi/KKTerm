@@ -870,18 +870,24 @@ fn launch_app_launcher_entry(
 }
 
 #[tauri::command]
-fn import_settings_database(
+async fn import_settings_database(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
-    secrets: tauri::State<'_, secrets::Secrets>,
-    tray_state: tauri::State<'_, app_tray::TrayState>,
-    power: tauri::State<'_, power::DontSleepManager>,
-    webviews: tauri::State<'_, webview::WebviewSessionManager>,
     path: String,
 ) -> Result<storage::ImportedDatabaseSnapshot, String> {
-    let snapshot = storage.import_database_zip(path.into())?;
-    let general_settings = storage.general_settings()?;
-    let credential_settings = storage.credential_settings()?;
+    let worker_app = app.clone();
+    let (snapshot, general_settings, credential_settings) =
+        run_blocking_database_command("settings database import", move || {
+            let storage = worker_app.state::<storage::Storage>();
+            let snapshot = storage.import_database_zip(path.into())?;
+            let general_settings = storage.general_settings()?;
+            let credential_settings = storage.credential_settings()?;
+            Ok((snapshot, general_settings, credential_settings))
+        })
+        .await?;
+    let secrets = app.state::<secrets::Secrets>();
+    let tray_state = app.state::<app_tray::TrayState>();
+    let power = app.state::<power::DontSleepManager>();
+    let webviews = app.state::<webview::WebviewSessionManager>();
     secrets.set_secret_store(credential_settings.secret_store())?;
     logging::set_advanced_debugging_enabled(general_settings.advanced_debugging_enabled());
     debug_heartbeat::start(app.clone());
@@ -900,11 +906,14 @@ fn import_settings_database(
 }
 
 #[tauri::command]
-fn export_settings_database(
-    storage: tauri::State<'_, storage::Storage>,
+async fn export_settings_database(
+    app: tauri::AppHandle,
     path: String,
 ) -> Result<storage::DatabaseBackupInfo, String> {
-    storage.export_database(path.into())
+    run_blocking_database_command("settings database export", move || {
+        app.state::<storage::Storage>().export_database(path.into())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -977,15 +986,18 @@ fn update_ssh_settings(
 }
 
 #[tauri::command]
-fn launch_ssh_x_server(
-    storage: tauri::State<'_, storage::Storage>,
+async fn launch_ssh_x_server(
+    app: tauri::AppHandle,
 ) -> Result<x_server::XServerLaunchResult, String> {
-    let settings = storage.ssh_settings()?;
-    x_server::launch_vcxsrv_if_needed(
-        settings.x_server_path(),
-        settings.x_server_display(),
-        Some(settings.x_server_args()),
-    )
+    run_blocking_command("X server launch", move || {
+        let settings = app.state::<storage::Storage>().ssh_settings()?;
+        x_server::launch_vcxsrv_if_needed(
+            settings.x_server_path(),
+            settings.x_server_display(),
+            Some(settings.x_server_args()),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1008,10 +1020,13 @@ async fn stop_ssh_x_server() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn generate_ssh_key_pair(
+async fn generate_ssh_key_pair(
     request: ssh_keys::GenerateSshKeyPairRequest,
 ) -> Result<ssh_keys::GeneratedSshKeyPair, String> {
-    ssh_keys::generate_key_pair(request)
+    run_blocking_command("SSH key generation", move || {
+        ssh_keys::generate_key_pair(request)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1687,11 +1702,14 @@ fn open_windows_task_manager() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn create_diagnostics_bundle(
+async fn create_diagnostics_bundle(
     app: tauri::AppHandle,
-    performance: tauri::State<'_, performance::PerformanceMonitor>,
 ) -> Result<diagnostics::DiagnosticsBundle, String> {
-    diagnostics::create_bundle(&app, &performance)
+    run_blocking_command("diagnostics bundle creation", move || {
+        let performance = app.state::<performance::PerformanceMonitor>();
+        diagnostics::create_bundle(&app, &performance)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1726,121 +1744,146 @@ fn update_tray_menu(
 }
 
 #[tauri::command]
-fn capture_screenshot_to_clipboard(
+async fn capture_screenshot_to_clipboard(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
     request: screenshot::CaptureScreenshotRequest,
 ) -> Result<(), String> {
-    let settings = storage.general_settings()?;
-    screenshot::capture_rect_to_clipboard(&app, request, settings.use_directx_screen_capture())
+    run_blocking_screenshot_command("screenshot clipboard capture", move || {
+        let settings = app.state::<storage::Storage>().general_settings()?;
+        screenshot::capture_rect_to_clipboard(&app, request, settings.use_directx_screen_capture())
+    })
+    .await
 }
 
 #[tauri::command]
-fn capture_screenshot_for_assistant(
+async fn capture_screenshot_for_assistant(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
     request: screenshot::CaptureScreenshotRequest,
 ) -> Result<screenshot::AssistantScreenshot, String> {
-    let settings = storage.general_settings()?;
-    screenshot::capture_rect_for_assistant(&app, request, settings.use_directx_screen_capture())
+    run_blocking_screenshot_command("assistant screenshot capture", move || {
+        let settings = app.state::<storage::Storage>().general_settings()?;
+        screenshot::capture_rect_for_assistant(&app, request, settings.use_directx_screen_capture())
+    })
+    .await
 }
 
 #[tauri::command]
-fn capture_fullscreen_screenshot_for_assistant(
-    storage: tauri::State<'_, storage::Storage>,
-) -> Result<screenshot::AssistantScreenshot, String> {
-    let settings = storage.general_settings()?;
-    screenshot::capture_fullscreen_for_assistant(settings.use_directx_screen_capture())
-}
-
-#[tauri::command]
-fn capture_screenshot_to_library(
+async fn capture_fullscreen_screenshot_for_assistant(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
+) -> Result<screenshot::AssistantScreenshot, String> {
+    run_blocking_screenshot_command("assistant fullscreen screenshot capture", move || {
+        let settings = app.state::<storage::Storage>().general_settings()?;
+        screenshot::capture_fullscreen_for_assistant(settings.use_directx_screen_capture())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn capture_screenshot_to_library(
+    app: tauri::AppHandle,
     request: screenshot::CaptureScreenshotRequest,
     kind: String,
 ) -> Result<screenshot::StoredScreenshot, String> {
-    let settings = storage.screenshot_settings()?;
-    let general_settings = storage.general_settings()?;
-    screenshot::capture_rect_to_library(
-        &app,
-        request,
-        kind,
-        settings.folder_path().to_string(),
-        general_settings.use_directx_screen_capture(),
-    )
+    run_blocking_screenshot_command("screenshot library capture", move || {
+        let storage = app.state::<storage::Storage>();
+        let settings = storage.screenshot_settings()?;
+        let general_settings = storage.general_settings()?;
+        screenshot::capture_rect_to_library(
+            &app,
+            request,
+            kind,
+            settings.folder_path().to_string(),
+            general_settings.use_directx_screen_capture(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn capture_fullscreen_screenshot_to_library(
+async fn capture_fullscreen_screenshot_to_library(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
     kind: String,
 ) -> Result<screenshot::StoredScreenshot, String> {
-    let settings = storage.screenshot_settings()?;
-    let general_settings = storage.general_settings()?;
-    screenshot::capture_fullscreen_to_library(
-        &app,
-        kind,
-        settings.folder_path().to_string(),
-        general_settings.use_directx_screen_capture(),
-    )
+    run_blocking_screenshot_command("fullscreen screenshot library capture", move || {
+        let storage = app.state::<storage::Storage>();
+        let settings = storage.screenshot_settings()?;
+        let general_settings = storage.general_settings()?;
+        screenshot::capture_fullscreen_to_library(
+            &app,
+            kind,
+            settings.folder_path().to_string(),
+            general_settings.use_directx_screen_capture(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn capture_active_window_screenshot_to_library(
+async fn capture_active_window_screenshot_to_library(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
     kind: String,
 ) -> Result<screenshot::StoredScreenshot, String> {
-    let settings = storage.screenshot_settings()?;
-    let general_settings = storage.general_settings()?;
-    screenshot::capture_active_window_to_library(
-        &app,
-        kind,
-        settings.folder_path().to_string(),
-        general_settings.use_directx_screen_capture(),
-    )
+    run_blocking_screenshot_command("active-window screenshot library capture", move || {
+        let storage = app.state::<storage::Storage>();
+        let settings = storage.screenshot_settings()?;
+        let general_settings = storage.general_settings()?;
+        screenshot::capture_active_window_to_library(
+            &app,
+            kind,
+            settings.folder_path().to_string(),
+            general_settings.use_directx_screen_capture(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn capture_interactive_region_screenshot_to_library(
+async fn capture_interactive_region_screenshot_to_library(
     app: tauri::AppHandle,
-    storage: tauri::State<'_, storage::Storage>,
     kind: String,
 ) -> Result<screenshot::StoredScreenshot, String> {
-    let settings = storage.screenshot_settings()?;
-    let general_settings = storage.general_settings()?;
-    screenshot::capture_interactive_region_to_library(
-        &app,
-        kind,
-        settings.folder_path().to_string(),
-        general_settings.use_directx_screen_capture(),
-    )
+    run_blocking_screenshot_command("interactive screenshot library capture", move || {
+        let storage = app.state::<storage::Storage>();
+        let settings = storage.screenshot_settings()?;
+        let general_settings = storage.general_settings()?;
+        screenshot::capture_interactive_region_to_library(
+            &app,
+            kind,
+            settings.folder_path().to_string(),
+            general_settings.use_directx_screen_capture(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn list_screenshots(
-    storage: tauri::State<'_, storage::Storage>,
+async fn list_screenshots(
+    app: tauri::AppHandle,
     request: screenshot::ListScreenshotsRequest,
 ) -> Result<screenshot::ListScreenshotsResponse, String> {
-    let settings = storage.screenshot_settings()?;
-    screenshot::list_library_screenshots(request, settings.folder_path().to_string())
+    run_blocking_screenshot_command("screenshot library listing", move || {
+        let settings = app.state::<storage::Storage>().screenshot_settings()?;
+        screenshot::list_library_screenshots(request, settings.folder_path().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn delete_screenshot(
-    storage: tauri::State<'_, storage::Storage>,
-    id: String,
-) -> Result<(), String> {
-    let settings = storage.screenshot_settings()?;
-    screenshot::delete_library_screenshot(id, settings.folder_path().to_string())
+async fn delete_screenshot(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    run_blocking_screenshot_command("screenshot deletion", move || {
+        let settings = app.state::<storage::Storage>().screenshot_settings()?;
+        screenshot::delete_library_screenshot(id, settings.folder_path().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn clear_screenshots(storage: tauri::State<'_, storage::Storage>) -> Result<(), String> {
-    let settings = storage.screenshot_settings()?;
-    screenshot::clear_library_screenshots(settings.folder_path().to_string())
+async fn clear_screenshots(app: tauri::AppHandle) -> Result<(), String> {
+    run_blocking_screenshot_command("screenshot library clearing", move || {
+        let settings = app.state::<storage::Storage>().screenshot_settings()?;
+        screenshot::clear_library_screenshots(settings.folder_path().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2195,54 +2238,76 @@ fn stop_terminal_recording(
 }
 
 #[tauri::command]
-fn list_terminal_recordings(
+async fn list_terminal_recordings(
     app: tauri::AppHandle,
-    sessions: tauri::State<'_, sessions::SessionManager>,
     request: sessions::ListTerminalRecordingsRequest,
 ) -> Result<Vec<sessions::TerminalRecordingEntry>, String> {
-    sessions.list_terminal_recordings(sessions::terminal_recordings_root(&app)?, request)
+    run_blocking_command("terminal recording listing", move || {
+        let root = sessions::terminal_recordings_root(&app)?;
+        app.state::<sessions::SessionManager>()
+            .list_terminal_recordings(root, request)
+    })
+    .await
 }
 
 #[tauri::command]
-fn list_all_terminal_recordings(
+async fn list_all_terminal_recordings(
     app: tauri::AppHandle,
 ) -> Result<Vec<sessions::TerminalRecordingEntry>, String> {
-    sessions::list_all_terminal_recordings(sessions::terminal_recordings_root(&app)?)
+    run_blocking_command("all terminal recordings listing", move || {
+        sessions::list_all_terminal_recordings(sessions::terminal_recordings_root(&app)?)
+    })
+    .await
 }
 
 #[tauri::command]
-fn search_terminal_recordings(
+async fn search_terminal_recordings(
     app: tauri::AppHandle,
     query: String,
 ) -> Result<Vec<PathBuf>, String> {
-    sessions::search_terminal_recordings(sessions::terminal_recordings_root(&app)?, &query)
+    run_blocking_command("terminal recording search", move || {
+        sessions::search_terminal_recordings(sessions::terminal_recordings_root(&app)?, &query)
+    })
+    .await
 }
 
 #[tauri::command]
-fn prepare_terminal_recording_summary(
+async fn prepare_terminal_recording_summary(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<sessions::TerminalRecordingSummaryInput, String> {
-    sessions::prepare_terminal_recording_summary(sessions::terminal_recordings_root(&app)?, &path)
+    run_blocking_command("terminal recording summary preparation", move || {
+        sessions::prepare_terminal_recording_summary(
+            sessions::terminal_recordings_root(&app)?,
+            &path,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn save_terminal_recording_summary(
+async fn save_terminal_recording_summary(
     app: tauri::AppHandle,
     request: sessions::SaveTerminalRecordingSummaryRequest,
 ) -> Result<(), String> {
-    sessions::save_terminal_recording_summary(
-        sessions::terminal_recordings_root(&app)?,
-        request,
-    )
+    run_blocking_command("terminal recording summary save", move || {
+        sessions::save_terminal_recording_summary(
+            sessions::terminal_recordings_root(&app)?,
+            request,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-fn export_terminal_recordings(
+async fn export_terminal_recordings(
     app: tauri::AppHandle,
     request: sessions::ExportTerminalRecordingsRequest,
 ) -> Result<sessions::ExportTerminalRecordingsResult, String> {
-    sessions::export_terminal_recordings(sessions::terminal_recordings_root(&app)?, request)
+    run_blocking_command("terminal recording export", move || {
+        sessions::export_terminal_recordings(sessions::terminal_recordings_root(&app)?, request)
+    })
+    .await
 }
 
 fn open_folder_in_file_manager(app: &tauri::AppHandle, folder: &Path) -> Result<(), String> {
@@ -2556,6 +2621,42 @@ where
         .map_err(|error| format!("{label} worker failed: {error}"))?
 }
 
+static SCREENSHOT_COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+async fn run_blocking_screenshot_command<T, F>(label: &'static str, job: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    run_blocking_command(label, move || {
+        let _guard = SCREENSHOT_COMMAND_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        job()
+    })
+    .await
+}
+
+// Full and selective settings-database import/export share the live SQLite
+// file, its backup folder, and second-resolution temp snapshot paths; the
+// multi-step replace/backup sequences are only safe when whole commands cannot
+// overlap.
+static SETTINGS_DATABASE_COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+async fn run_blocking_database_command<T, F>(label: &'static str, job: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    run_blocking_command(label, move || {
+        let _guard = SETTINGS_DATABASE_COMMAND_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        job()
+    })
+    .await
+}
+
 #[tauri::command]
 async fn start_sftp_session(
     app: tauri::AppHandle,
@@ -2583,10 +2684,13 @@ async fn list_sftp_directory(
 }
 
 #[tauri::command]
-fn list_local_directory(
+async fn list_local_directory(
     request: sftp::ListLocalDirectoryRequest,
 ) -> Result<sftp::LocalDirectoryListing, String> {
-    sftp::list_local_directory(request)
+    run_blocking_command("list local directory", move || {
+        sftp::list_local_directory(request)
+    })
+    .await
 }
 
 #[tauri::command]
