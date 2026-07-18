@@ -6,21 +6,10 @@
 
 import { useTranslation } from "react-i18next";
 import type { MouseEvent } from "react";
-import {
-  invokeCommand,
-  isTauriRuntime,
-  selectInstallerGuiLauncherFile,
-} from "../../lib/tauri";
-import { useWorkspaceStore } from "../../store";
 import { iconUrlForRecipe, FALLBACK_ICON_URL } from "./icons";
-import {
-  launchKindForRecipe,
-  readGuiLauncherPath,
-  removeGuiLauncherPath,
-  writeGuiLauncherPath,
-} from "./launch";
 import { useInstallerStore } from "./state";
 import { useToolStatus } from "./useToolStatus";
+import { useInstallerRunAction } from "./useInstallerRunAction";
 import {
   isOfficialScriptInstall,
   localizedDescription,
@@ -31,10 +20,6 @@ export function ToolRow({ recipe }: { recipe: Recipe }) {
   const { t, i18n } = useTranslation();
   const openInfoDialog = useInstallerStore((s) => s.openInfoDialog);
   const openStepperDialog = useInstallerStore((s) => s.openStepperDialog);
-  const openLauncherDialog = useInstallerStore((s) => s.openLauncherDialog);
-  const showStatusBarNotice = useWorkspaceStore(
-    (state) => state.showStatusBarNotice,
-  );
   const detected = useInstallerStore((s) => s.detected[recipe.id]);
   const officialScript = isOfficialScriptInstall(detected);
 
@@ -67,63 +52,12 @@ export function ToolRow({ recipe }: { recipe: Recipe }) {
     handleOpen();
   }
 
-  // Run button for installed tools. GUI apps start directly; command-line
-  // tools open the mini launcher dialog; managed web apps and tool suites
-  // open the info dialog that already hosts their launcher surface.
-  const launchKind = isInstalled && !busy ? launchKindForRecipe(recipe.id) : null;
-
-  async function launchGuiApp() {
-    if (!isTauriRuntime()) return;
-    const customPath = readGuiLauncherPath(recipe.id);
-    let launched: boolean;
-    try {
-      try {
-        launched = await invokeCommand("installer_launch_app", {
-          toolId: recipe.id,
-          ...(customPath ? { customPath } : {}),
-        });
-      } catch (error) {
-        if (!customPath) throw error;
-        removeGuiLauncherPath(recipe.id);
-        launched = await invokeCommand("installer_launch_app", {
-          toolId: recipe.id,
-        });
-      }
-      if (launched) return;
-
-      const selectedPath = await selectInstallerGuiLauncherFile({
-        title: t("installer.launcher.selectAppTitle", { name: recipe.name }),
-        filterName: t("installer.launcher.applicationFiles"),
-      });
-      if (!selectedPath) return;
-
-      launched = await invokeCommand("installer_launch_app", {
-        toolId: recipe.id,
-        customPath: selectedPath,
-      });
-      if (!launched) {
-        showStatusBarNotice(t("installer.launcher.selectedAppFailed"), {
-          tone: "error",
-        });
-        return;
-      }
-      writeGuiLauncherPath(recipe.id, selectedPath);
-    } catch {
-      showStatusBarNotice(t("installer.launcher.selectedAppFailed"), {
-        tone: "error",
-      });
-    }
-  }
+  const runAction = useInstallerRunAction(recipe);
+  const launchKind = isInstalled && !busy ? runAction.launchKind : null;
 
   function handleRunClick(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
-    if (launchKind === "gui") {
-      void launchGuiApp();
-    } else if (launchKind === "cli") {
-      openLauncherDialog(recipe.id);
-    } else {
-      openInfoDialog(recipe.id);
-    }
+    runAction.run();
   }
 
   const installedVersionText = isInstalled

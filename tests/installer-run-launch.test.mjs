@@ -8,11 +8,12 @@ async function read(path) {
 
 test("installed tiles expose a Run button routed by launch kind", async () => {
   const toolRow = await read("../src/modules/installer/ToolRow.tsx");
+  const runAction = await read("../src/modules/installer/useInstallerRunAction.ts");
 
   assert.match(
     toolRow,
-    /launchKindForRecipe\(recipe\.id\)/,
-    "ToolRow should classify installed recipes through launch.ts",
+    /useInstallerRunAction\(recipe\)/,
+    "ToolRow should share the same Run routing as List and details surfaces",
   );
   assert.match(
     toolRow,
@@ -20,14 +21,19 @@ test("installed tiles expose a Run button routed by launch kind", async () => {
     "Run should only show for installed tools with no operation in flight",
   );
   assert.match(
-    toolRow,
+    runAction,
+    /launchKindForRecipe\(recipe\.id\)/,
+    "the shared action should classify installed recipes through launch.ts",
+  );
+  assert.match(
+    runAction,
     /installer_launch_app/,
     "GUI apps should launch through the dedicated backend command",
   );
   assert.match(
-    toolRow,
+    runAction,
     /openLauncherDialog\(recipe\.id\)/,
-    "CLI tools should open the mini launcher dialog",
+    "CLI and suite tools should open a separate Run dialog",
   );
   assert.match(
     toolRow,
@@ -45,14 +51,25 @@ test("installed details route CLI Run through the launcher dialog", async () => 
   assert.ok(installedInfo, "the installed-details component should exist");
   assert.match(
     installedInfo,
-    /const openLauncherDialog = useInstallerStore\([\s\S]*?openLauncherDialog/,
-    "installed details should subscribe to the shared launcher-dialog action",
+    /const runAction = useInstallerRunAction\(recipe\)/,
+    "installed details should use the shared Run action",
   );
   assert.match(
     installedInfo,
-    /function handleOpenTerminalLauncher\(\) \{\s*openLauncherDialog\(recipe\.id\);\s*\}/,
-    "the details Run button should open the same setup dialog as tile Run",
+    /runAction\.launchKind === "suite"[\s\S]*onClick=\{runAction\.run\}/,
+    "the details Run button should open the same separate Run dialog as tile Run",
   );
+});
+
+test("Gallery and List base views both expose shared Run and install actions", async () => {
+  const toolRow = await read("../src/modules/installer/ToolRow.tsx");
+  const listRow = await read("../src/modules/installer/InstallerListRow.tsx");
+
+  for (const source of [toolRow, listRow]) {
+    assert.match(source, /useInstallerRunAction\(recipe\)/);
+    assert.match(source, /installer\.actions\.run/);
+    assert.match(source, /installer\.actions\.install/);
+  }
 });
 
 test("coding-agent launcher shows persisted options instead of samples", async () => {
@@ -290,19 +307,19 @@ test("GUI automatic launch runs through a closed backend allow-list", async () =
 });
 
 test("GUI launch falls back to a persisted user-selected executable or shortcut", async () => {
-  const toolRow = await read("../src/modules/installer/ToolRow.tsx");
+  const runAction = await read("../src/modules/installer/useInstallerRunAction.ts");
   const launch = await read("../src/modules/installer/launch.ts");
   const durable = await read("../src/lib/durableUiState.ts");
   const tauri = await read("../src/lib/tauri.ts");
   const commands = await read("../src-tauri/src/installer/commands.rs");
 
-  assert.match(toolRow, /readGuiLauncherPath\(recipe\.id\)/);
-  assert.match(toolRow, /selectInstallerGuiLauncherFile/);
-  assert.match(toolRow, /customPath: selectedPath/);
-  assert.match(toolRow, /writeGuiLauncherPath\(recipe\.id, selectedPath\)/);
-  assert.match(toolRow, /removeGuiLauncherPath\(recipe\.id\)/);
-  assert.match(toolRow, /installer\.launcher\.selectAppTitle/);
-  assert.match(toolRow, /installer\.launcher\.selectedAppFailed/);
+  assert.match(runAction, /readGuiLauncherPath\(recipe\.id\)/);
+  assert.match(runAction, /selectInstallerGuiLauncherFile/);
+  assert.match(runAction, /customPath: selectedPath/);
+  assert.match(runAction, /writeGuiLauncherPath\(recipe\.id, selectedPath\)/);
+  assert.match(runAction, /removeGuiLauncherPath\(recipe\.id\)/);
+  assert.match(runAction, /installer\.launcher\.selectAppTitle/);
+  assert.match(runAction, /installer\.launcher\.selectedAppFailed/);
 
   assert.match(launch, /kkterm\.installerGuiLauncherPaths\.v1/);
   assert.match(durable, /"kkterm\.installerGuiLauncherPaths\.v1"/);

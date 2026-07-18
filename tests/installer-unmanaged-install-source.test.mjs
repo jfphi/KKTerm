@@ -39,7 +39,7 @@ test("official-script installs expose safe updates but hide WinGet uninstall", a
   );
   assert.match(
     dialogSource,
-    /!officialScript \? \(\s*<button[\s\S]*installer\.actions\.uninstall/,
+    /!officialScript \? \(\s*<Btn[\s\S]*installer\.actions\.uninstall/,
     "uninstall must not route a standalone copy through the WinGet recipe",
   );
 });

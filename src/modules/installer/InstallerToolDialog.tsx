@@ -5,13 +5,20 @@
 //   * "stepper" — install in progress or just completed; renders the n8n-style
 //                 step list with per-step logs. Pressing Install from "info"
 //                 mode flips the dialog to "stepper".
+//   * "launcher" — standard CLI Run setup, or a suite-specific searchable
+//                  launcher kept separate from installation details.
 //
 // Honors AGENTS.md dialog rules: concise title, a single footer dismiss path,
 // and host-platform footer buttons at bottom right.
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LegacyDialogActions } from "../../app/ui/dialog";
+import {
+  Btn,
+  DIcon,
+  DialogShell,
+  LegacyDialogActions,
+} from "../../app/ui/dialog";
 import {
   invokeCommand,
   isTauriRuntime,
@@ -33,6 +40,7 @@ import {
   cliLauncherUsesProjectFolders,
   codingAgentCommandReferenceUrlForRecipe,
   codingAgentLaunchOptionsForRecipe,
+  launchKindForRecipe,
   readCodingAgentLaunchSettings,
   readRecentLaunchFolders,
   rememberLaunchFolder,
@@ -61,6 +69,7 @@ import {
   type RecipeOption,
 } from "./types";
 import type { CreateConnectionRequest } from "../../types";
+import { useInstallerRunAction } from "./useInstallerRunAction";
 
 export function InstallerToolDialog() {
   const open = useInstallerStore((s) => s.openDialog);
@@ -81,11 +90,11 @@ export function InstallerToolDialog() {
   if (!recipe) return null;
 
   return (
-    <div className="dialog-backdrop connection-dialog-backdrop" role="presentation">
+    <DialogShell>
       <div
         aria-label={recipe.name}
         aria-modal="true"
-        className="connection-dialog installer-tool-dialog"
+        className="kk-dlg installer-tool-dialog"
         role="dialog"
       >
         {open.mode === "stepper" ? (
@@ -96,7 +105,7 @@ export function InstallerToolDialog() {
           <InfoBody recipe={recipe} />
         )}
       </div>
-    </div>
+    </DialogShell>
   );
 }
 
@@ -122,7 +131,6 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
   const catalog = useInstallerStore((s) => s.catalog);
   const closeDialog = useInstallerStore((s) => s.closeDialog);
   const openStepperDialog = useInstallerStore((s) => s.openStepperDialog);
-  const openLauncherDialog = useInstallerStore((s) => s.openLauncherDialog);
   const beginInFlight = useInstallerStore((s) => s.beginInFlight);
   const openWslManager = useInstallerStore((s) => s.openWslManager);
   const showStatusBarNotice = useWorkspaceStore(
@@ -156,31 +164,11 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
   const terminalLaunch = terminalLaunchAffordanceForRecipe(recipe);
   const workspaceSpec = workspaceConnectionSpecForRecipe(recipe);
   const installMode = installModeForInstalledRecipe(detected);
+  const runAction = useInstallerRunAction(recipe);
   const [webUiStatus, setWebUiStatus] = useState<ManagedWebUiStatus | null>(
     null,
   );
   const statusRefreshInFlight = useRef(false);
-  const [quickLaunch, setQuickLaunch] = useState<QuickLaunchEntry[]>([]);
-  const [quickLaunchQuery, setQuickLaunchQuery] = useState("");
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      setQuickLaunch([]);
-      return;
-    }
-    let cancelled = false;
-    void invokeCommand("installer_list_quick_launch", { toolId: recipe.id })
-      .then((entries) => {
-        if (!cancelled) setQuickLaunch(entries);
-      })
-      .catch(() => {
-        if (!cancelled) setQuickLaunch([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [recipe.id]);
-
   useEffect(() => {
     if (!hasWebUi || !isTauriRuntime()) {
       setWebUiStatus(null);
@@ -335,45 +323,6 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
     }
   }
 
-  function handleOpenTerminalLauncher() {
-    openLauncherDialog(recipe.id);
-  }
-
-  async function handleQuickLaunch(command: string) {
-    if (!isTauriRuntime()) return;
-    try {
-      await invokeCommand("installer_launch_quick_command", {
-        toolId: recipe.id,
-        command,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(message, { tone: "error" });
-    }
-  }
-
-  async function handleOpenQuickLaunchTerminal() {
-    if (!isTauriRuntime()) return;
-    try {
-      await invokeCommand("installer_open_quick_launch_terminal", {
-        toolId: recipe.id,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(message, { tone: "error" });
-    }
-  }
-
-  const quickLaunchQueryNorm = quickLaunchQuery.trim().toLowerCase();
-  const quickLaunchFiltered = quickLaunchQueryNorm
-    ? quickLaunch.filter((entry) =>
-        `${entry.label} ${entry.command} ${entry.description}`
-          .toLowerCase()
-          .includes(quickLaunchQueryNorm),
-      )
-    : quickLaunch;
-  const quickLaunchHasCli = quickLaunch.some((entry) => entry.cli);
-
   async function handleAddToWorkspace() {
     if (!workspaceSpec || !isTauriRuntime()) return;
     try {
@@ -390,17 +339,11 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
 
   return (
     <>
-      <header className="installer-tool-dialog__header">
-        <ToolIcon recipe={recipe} />
-        <div>
-          <h2>
-            {recipe.name}
-            {version ? (
-              <span className="installer-tool-dialog__version"> {version}</span>
-            ) : null}
-          </h2>
-        </div>
-      </header>
+      <ToolDialogHeader
+        recipe={recipe}
+        title={recipe.name}
+        version={version}
+      />
       <div className="installer-tool-dialog__body">
         {description ? (
           <p className="installer-tool-dialog__desc">{description}</p>
@@ -413,13 +356,9 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
                 to: latest,
               })}
             </span>
-            <button
-              type="button"
-              className="installer-button primary"
-              onClick={startUpdate}
-            >
+            <Btn sm kind="primary" icon="refresh" onClick={startUpdate}>
               {t("installer.actions.update")}
-            </button>
+            </Btn>
           </div>
         ) : null}
         <dl className="installer-tool-dialog__grid">
@@ -494,70 +433,6 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             </Row>
           ) : null}
         </dl>
-        {quickLaunch.length > 0 ? (
-          <div className="installer-tool-dialog__quick-launch">
-            <div className="installer-tool-dialog__quick-launch-head">
-              <span className="installer-tool-dialog__quick-launch-label">
-                {t("installer.dialog.quickLaunch")}
-              </span>
-              {quickLaunchHasCli ? (
-                <button
-                  type="button"
-                  className="secondary-button installer-tool-dialog__quick-launch-terminal"
-                  onClick={() => void handleOpenQuickLaunchTerminal()}
-                >
-                  {suiteTerminalIsElevated(recipe.id)
-                    ? t("installer.quickLaunch.openTerminal")
-                    : t("installer.launcher.openTerminal")}
-                </button>
-              ) : null}
-            </div>
-            <input
-              type="search"
-              className="installer-tool-dialog__quick-launch-search"
-              placeholder={t("installer.quickLaunch.search")}
-              value={quickLaunchQuery}
-              onChange={(event) => setQuickLaunchQuery(event.target.value)}
-            />
-            <ul className="installer-tool-dialog__quick-launch-list">
-              {quickLaunchFiltered.map((entry) => (
-                <li
-                  key={entry.command}
-                  className="installer-tool-dialog__quick-launch-item"
-                  data-cli={entry.cli ? "true" : "false"}
-                >
-                  <div className="installer-tool-dialog__quick-launch-meta">
-                    <span className="installer-tool-dialog__quick-launch-name">
-                      {entry.label}
-                      <code>{entry.command}</code>
-                    </span>
-                    <span className="installer-tool-dialog__quick-launch-desc">
-                      {entry.description}
-                    </span>
-                  </div>
-                  {entry.cli ? (
-                    <span className="installer-tool-dialog__quick-launch-badge">
-                      {t("installer.quickLaunch.cli")}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => void handleQuickLaunch(entry.command)}
-                    >
-                      {t("installer.quickLaunch.launch")}
-                    </button>
-                  )}
-                </li>
-              ))}
-              {quickLaunchFiltered.length === 0 ? (
-                <li className="installer-tool-dialog__quick-launch-empty">
-                  {t("installer.quickLaunch.noMatches")}
-                </li>
-              ) : null}
-            </ul>
-          </div>
-        ) : null}
         {supportsLatestVersion ? (
           <label className="installer-tool-dialog__pin">
             <span>{t("installer.options.pinVersion")}</span>
@@ -575,13 +450,9 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             WinGet owns an uninstallable package. Keep only Uninstall hidden so
             the backend cannot remove a separate catalog-provider copy. */}
         {!officialScript ? (
-          <button
-            type="button"
-            className="secondary-button danger"
-            onClick={attemptUninstall}
-          >
+          <Btn kind="danger" icon="trash" onClick={attemptUninstall}>
             {t("installer.actions.uninstall")}
-          </button>
+          </Btn>
         ) : null}
         {isWsl ? (
           <button
@@ -590,15 +461,6 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             onClick={openWslManager}
           >
             {t("installer.wsl.manageDistros")}
-          </button>
-        ) : null}
-        {terminalLaunch ? (
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void handleOpenTerminalLauncher()}
-          >
-            {t("installer.actions.run")}
           </button>
         ) : null}
         {workspaceSpec ? (
@@ -665,9 +527,19 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
           </button>
         ) : null}
         </>}
-        cancel={<button type="button" className="toolbar-button" onClick={closeDialog}>
-          {t("common.close")}
-        </button>}
+        primary={
+          runAction.launchKind === "gui" ||
+          runAction.launchKind === "cli" ||
+          runAction.launchKind === "suite" ? (
+            <Btn
+              icon={runAction.launchKind === "gui" ? undefined : "terminal"}
+              onClick={runAction.run}
+            >
+              {t("installer.actions.run")}
+            </Btn>
+          ) : null
+        }
+        cancel={<Btn onClick={closeDialog}>{t("common.close")}</Btn>}
       />
       {uninstallConfirm ? (
         <InstallerConfirmDialog
@@ -833,12 +705,7 @@ function NotInstalledInfoBody({ recipe }: { recipe: Recipe }) {
 
   return (
     <>
-      <header className="installer-tool-dialog__header">
-        <ToolIcon recipe={recipe} />
-        <div>
-          <h2>{recipe.name}</h2>
-        </div>
-      </header>
+      <ToolDialogHeader recipe={recipe} title={recipe.name} />
       <div className="installer-tool-dialog__body">
         {description ? (
           <p className="installer-tool-dialog__desc">{description}</p>
@@ -914,17 +781,17 @@ function NotInstalledInfoBody({ recipe }: { recipe: Recipe }) {
       </div>
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
-        primary={<button
-          type="button"
-          className="secondary-button"
-          onClick={attemptInstall}
-          disabled={wslBlocked}
-        >
-          {t("installer.actions.install")}
-        </button>}
-        cancel={<button type="button" className="toolbar-button" onClick={closeDialog}>
-          {t("common.cancel")}
-        </button>}
+        primary={
+          <Btn
+            kind="primary"
+            icon="download"
+            onClick={attemptInstall}
+            disabled={wslBlocked}
+          >
+            {t("installer.actions.install")}
+          </Btn>
+        }
+        cancel={<Btn onClick={closeDialog}>{t("common.cancel")}</Btn>}
       />
       {installConfirm ? (
         <InstallerConfirmDialog
@@ -988,20 +855,18 @@ function StepperBody({ recipe }: { recipe: Recipe }) {
 
   return (
     <>
-      <header className="installer-tool-dialog__header">
-        <ToolIcon recipe={recipe} />
-        <div>
-          <h2>{t(titleKey, { name: recipe.name })}</h2>
-        </div>
-      </header>
+      <ToolDialogHeader
+        recipe={recipe}
+        title={t(titleKey, { name: recipe.name })}
+        sub={inFlight?.currentStep ?? undefined}
+        busy={running}
+      />
       <div className="installer-tool-dialog__body">
         {lastStatus?.kind === "failed" ? (
-          <p
-            className="installer-tool-dialog__hint installer-tool-dialog__hint--error"
-            role="status"
-          >
-            {lastStatus.message}
-          </p>
+          <div className="installer-tool-dialog__error-banner" role="status">
+            <DIcon name="alert" size={18} />
+            <p>{lastStatus.message}</p>
+          </div>
         ) : null}
         {lastStatus?.kind === "cancelled" ? (
           <p className="installer-tool-dialog__hint" role="status">
@@ -1013,17 +878,11 @@ function StepperBody({ recipe }: { recipe: Recipe }) {
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
         extraLeft={running ? (
-          <button
-            type="button"
-            className="secondary-button danger"
-            onClick={() => void handleCancel()}
-          >
+          <Btn kind="danger" onClick={() => void handleCancel()}>
             {t("installer.actions.cancel")}
-          </button>
+          </Btn>
         ) : null}
-        cancel={<button type="button" className="toolbar-button" onClick={closeDialog}>
-          {t("common.close")}
-        </button>}
+        primary={<Btn kind="primary" onClick={closeDialog}>{t("common.close")}</Btn>}
       />
     </>
   );
@@ -1158,6 +1017,14 @@ function StepperList({
 const RECENT_LAUNCH_FOLDERS_VISIBLE = 5;
 
 function LauncherBody({ recipe }: { recipe: Recipe }) {
+  return launchKindForRecipe(recipe.id) === "suite" ? (
+    <SuiteLauncherBody recipe={recipe} />
+  ) : (
+    <CliLauncherBody recipe={recipe} />
+  );
+}
+
+function CliLauncherBody({ recipe }: { recipe: Recipe }) {
   const { t } = useTranslation();
   const closeDialog = useInstallerStore((s) => s.closeDialog);
   const showStatusBarNotice = useWorkspaceStore(
@@ -1217,16 +1084,12 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
 
   return (
     <>
-      <header className="installer-tool-dialog__header">
-        <ToolIcon recipe={recipe} />
-        <div>
-          <h2>{t("installer.launcher.title", { name: recipe.name })}</h2>
-        </div>
-      </header>
+      <ToolDialogHeader
+        recipe={recipe}
+        title={t("installer.launcher.title", { name: recipe.name })}
+        sub={t("installer.launcher.body", { name: recipe.name })}
+      />
       <div className="installer-tool-dialog__body">
-        <p className="installer-tool-dialog__desc">
-          {t("installer.launcher.body", { name: recipe.name })}
-        </p>
         {codingAgentOptions ? (
           <div className="installer-launcher__options">
             {commandReferenceUrl ? (
@@ -1316,31 +1179,151 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
         className="installer-tool-dialog__actions"
         extraLeft={
           usesProjectFolders ? (
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void handleChooseFolder()}
-            >
+            <Btn icon="folder" onClick={() => void handleChooseFolder()}>
               {t("installer.launcher.chooseFolder")}
-            </button>
+            </Btn>
           ) : null
         }
         primary={
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void openTerminal()}
-          >
+          <Btn kind="primary" icon="terminal" onClick={() => void openTerminal()}>
             {usesProjectFolders
               ? t("installer.actions.run")
               : t("installer.launcher.openTerminal")}
-          </button>
+          </Btn>
         }
         cancel={
-          <button type="button" className="toolbar-button" onClick={closeDialog}>
-            {t("common.close")}
-          </button>
+          <Btn onClick={closeDialog}>{t("common.close")}</Btn>
         }
+      />
+    </>
+  );
+}
+
+function SuiteLauncherBody({ recipe }: { recipe: Recipe }) {
+  const { t, i18n } = useTranslation();
+  const closeDialog = useInstallerStore((s) => s.closeDialog);
+  const detected = useInstallerStore((s) => s.detected[recipe.id]);
+  const showStatusBarNotice = useWorkspaceStore(
+    (state) => state.showStatusBarNotice,
+  );
+  const [entries, setEntries] = useState<QuickLaunchEntry[]>([]);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      setEntries([]);
+      return;
+    }
+    let cancelled = false;
+    void invokeCommand("installer_list_quick_launch", { toolId: recipe.id })
+      .then((nextEntries) => {
+        if (!cancelled) setEntries(nextEntries);
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recipe.id]);
+
+  async function handleLaunch(command: string) {
+    if (!isTauriRuntime()) return;
+    try {
+      await invokeCommand("installer_launch_quick_command", {
+        toolId: recipe.id,
+        command,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(message, { tone: "error" });
+    }
+  }
+
+  async function handleOpenTerminal() {
+    if (!isTauriRuntime()) return;
+    try {
+      await invokeCommand("installer_open_quick_launch_terminal", {
+        toolId: recipe.id,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(message, { tone: "error" });
+    }
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredEntries = normalizedQuery
+    ? entries.filter((entry) =>
+        `${entry.label} ${entry.command} ${entry.description}`
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
+    : entries;
+  const hasCli = entries.some((entry) => entry.cli);
+  const description =
+    recipe.descriptionLocales?.[i18n.language] ?? recipe.descriptionEn;
+
+  return (
+    <>
+      <ToolDialogHeader
+        recipe={recipe}
+        title={t("installer.launcher.title", { name: recipe.name })}
+        version={detected?.installedVersion ?? null}
+        sub={description}
+      />
+      <div className="installer-tool-dialog__body installer-suite-launcher">
+        <label className="installer-suite-launcher__search">
+          <DIcon name="search" size={15} />
+          <input
+            type="search"
+            placeholder={t("installer.quickLaunch.search")}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <ul className="installer-suite-launcher__list">
+          {filteredEntries.map((entry) => (
+            <li key={entry.command} className="installer-suite-launcher__item">
+              <div className="installer-suite-launcher__meta">
+                <span className="installer-suite-launcher__name">
+                  {entry.label}
+                  <code>{entry.command}</code>
+                </span>
+                <span className="installer-suite-launcher__desc">
+                  {entry.description}
+                </span>
+              </div>
+              {entry.cli ? (
+                <span className="installer-suite-launcher__badge">
+                  {t("installer.quickLaunch.cli")}
+                </span>
+              ) : (
+                <Btn sm onClick={() => void handleLaunch(entry.command)}>
+                  {t("installer.quickLaunch.launch")}
+                </Btn>
+              )}
+            </li>
+          ))}
+          {filteredEntries.length === 0 ? (
+            <li className="installer-suite-launcher__empty">
+              {t("installer.quickLaunch.noMatches")}
+            </li>
+          ) : null}
+        </ul>
+      </div>
+      <LegacyDialogActions
+        className="installer-tool-dialog__actions"
+        primary={
+          hasCli ? (
+            <Btn kind="primary" icon="terminal" onClick={() => void handleOpenTerminal()}>
+              {suiteTerminalIsElevated(recipe.id)
+                ? t("installer.quickLaunch.openTerminal")
+                : t("installer.launcher.openTerminal")}
+            </Btn>
+          ) : null
+        }
+        cancel={<Btn onClick={closeDialog}>{t("common.close")}</Btn>}
       />
     </>
   );
@@ -1364,6 +1347,38 @@ function ToolIcon({ recipe }: { recipe: Recipe }) {
         }
       }}
     />
+  );
+}
+
+function ToolDialogHeader({
+  recipe,
+  title,
+  version,
+  sub,
+  busy = false,
+}: {
+  recipe: Recipe;
+  title: React.ReactNode;
+  version?: string | null;
+  sub?: React.ReactNode;
+  busy?: boolean;
+}) {
+  return (
+    <header className="installer-tool-dialog__header">
+      <span className="installer-tool-dialog__icon-wrap">
+        <ToolIcon recipe={recipe} />
+      </span>
+      <div className="installer-tool-dialog__heading">
+        <div className="installer-tool-dialog__title-line">
+          {busy ? <span className="installer-tool-dialog__spinner" aria-hidden="true" /> : null}
+          <h2>{title}</h2>
+          {version ? (
+            <span className="installer-tool-dialog__version">{version}</span>
+          ) : null}
+        </div>
+        {sub ? <p className="installer-tool-dialog__header-sub">{sub}</p> : null}
+      </div>
+    </header>
   );
 }
 

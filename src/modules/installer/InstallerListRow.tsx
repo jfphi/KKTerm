@@ -17,6 +17,7 @@ import {
   type Recipe,
 } from "./types";
 import { useToolStatus, type StatusTone } from "./useToolStatus";
+import { useInstallerRunAction } from "./useInstallerRunAction";
 
 function StatusPill({ tone, label }: { tone: StatusTone; label: string }) {
   const icon =
@@ -43,6 +44,7 @@ export function InstallerListRow({ recipe }: { recipe: Recipe }) {
   const openStepperDialog = useInstallerStore((s) => s.openStepperDialog);
   const detected = useInstallerStore((s) => s.detected[recipe.id]);
   const officialScript = isOfficialScriptInstall(detected);
+  const runAction = useInstallerRunAction(recipe);
 
   const {
     isInstalled,
@@ -70,6 +72,11 @@ export function InstallerListRow({ recipe }: { recipe: Recipe }) {
   function handleActionClick(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
     handleOpen();
+  }
+
+  function handleRunClick(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    runAction.run();
   }
 
   function handleWebLatestClick(event: MouseEvent<HTMLAnchorElement>) {
@@ -185,18 +192,29 @@ export function InstallerListRow({ recipe }: { recipe: Recipe }) {
         <StatusPill tone={statusTone} label={pillLabel} />
       </div>
       <div className="installer-listrow__action">
-        {!isInstalled || hasUpdate ? (
-          <button
-            type="button"
-            className="installer-act primary"
-            onClick={handleActionClick}
-            disabled={retrieving}
-          >
-            {hasUpdate
-              ? t("installer.actions.update")
-              : t("installer.actions.install")}
-          </button>
-        ) : null}
+        <span className="installer-listrow__action-group">
+          {isInstalled && !busy && runAction.launchKind ? (
+            <button
+              type="button"
+              className="installer-act"
+              onClick={handleRunClick}
+            >
+              {t("installer.actions.run")}
+            </button>
+          ) : null}
+          {!isInstalled || hasUpdate ? (
+            <button
+              type="button"
+              className="installer-act primary"
+              onClick={handleActionClick}
+              disabled={retrieving}
+            >
+              {hasUpdate
+                ? t("installer.actions.update")
+                : t("installer.actions.install")}
+            </button>
+          ) : null}
+        </span>
       </div>
     </div>
   );
