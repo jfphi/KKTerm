@@ -133,7 +133,7 @@ test("coding-agent launchers remember project folders", async () => {
   )?.[1];
   assert.ok(agentBlock, "launch.ts should declare the coding-agent set");
   const agentIds = [...agentBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-  for (const id of ["antigravity-cli", "claude-code-cli", "codex-cli", "kimi-code-cli", "grok-build", "opencode"]) {
+  for (const id of ["antigravity-cli", "claude-code-cli", "codex-cli", "cursor-cli", "kimi-code-cli", "grok-build", "opencode"]) {
     assert.ok(agentIds.includes(id), `${id} should remember launch folders`);
   }
   for (const id of agentIds) {

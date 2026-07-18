@@ -4,7 +4,7 @@
 // session cache holds them until the user clicks Refresh.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
@@ -233,6 +233,9 @@ pub fn detect_one(recipe: &Recipe) -> DetectedState {
             }
             Provider::DownloadInstaller { .. } if recipe.id == "antigravity-cli" => {
                 detect_antigravity_cli().with_install_provider(Some("downloadInstaller"))
+            }
+            Provider::DownloadInstaller { .. } if recipe.id == "cursor-cli" => {
+                detect_cursor_cli().with_install_provider(Some("downloadInstaller"))
             }
             Provider::DownloadInstaller { .. } => detect_installed_software_aliases(recipe)
                 .with_install_provider(Some("downloadInstaller")),
@@ -464,6 +467,34 @@ pub(super) fn detect_official_cli_installer(tool_id: &str) -> Option<DetectedSta
                 .map(|path| path.to_string_lossy().into_owned()),
         ),
     )
+}
+
+fn detect_cursor_cli() -> DetectedState {
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        return DetectedState::not_installed();
+    };
+    let Some(executable) = cursor_cli_command_candidates(&local_app_data)
+        .into_iter()
+        .find(|path| path.is_file())
+    else {
+        return DetectedState::not_installed();
+    };
+    let program = executable.to_string_lossy().into_owned();
+    let version = command_version(&program, &["--version"])
+        .and_then(|line| version_token_from_line(&line).or(Some(line)));
+    DetectedState::installed(version).with_install_location(
+        executable
+            .parent()
+            .map(|path| path.to_string_lossy().into_owned()),
+    )
+}
+
+fn cursor_cli_command_candidates(local_app_data: &Path) -> Vec<PathBuf> {
+    let install_dir = local_app_data.join("cursor-agent");
+    ["agent.cmd", "cursor-agent.cmd"]
+        .into_iter()
+        .map(|name| install_dir.join(name))
+        .collect()
 }
 
 fn official_cli_install_spec(tool_id: &str) -> Option<(&'static str, &'static str)> {
@@ -1434,6 +1465,18 @@ mod tests {
             Some(("grok", ".grok\\bin\\grok.exe"))
         );
         assert_eq!(official_cli_install_spec("unknown"), None);
+    }
+
+    #[test]
+    fn cursor_cli_detection_checks_only_official_command_shims() {
+        let local_app_data = Path::new("local-app-data");
+        assert_eq!(
+            cursor_cli_command_candidates(local_app_data),
+            ["agent.cmd", "cursor-agent.cmd"]
+                .into_iter()
+                .map(|name| local_app_data.join("cursor-agent").join(name))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
