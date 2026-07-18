@@ -2180,6 +2180,56 @@ fn chat_response_parser_accepts_reasoning_aliases() {
 }
 
 #[test]
+fn chat_response_parser_treats_null_tool_calls_as_empty() {
+    let completion: OpenAiCompatibleChatResponse = serde_json::from_value(json!({
+        "choices": [
+            {
+                "message": {
+                    "content": "Done",
+                    "tool_calls": null
+                }
+            }
+        ]
+    }))
+    .expect("chat response with null tool_calls deserializes");
+
+    assert!(completion.choices[0].message.tool_calls.is_empty());
+}
+
+#[test]
+fn chat_optional_content_and_array_fields_accept_null() {
+    let completion: OpenAiCompatibleChatResponse = serde_json::from_value(json!({
+        "choices": [
+            {
+                "message": {
+                    "content": null,
+                    "reasoning_details": null
+                }
+            }
+        ]
+    }))
+    .expect("chat response with null optional fields deserializes");
+
+    assert!(completion.choices[0].message.content.is_empty());
+    assert!(completion.choices[0].message.reasoning_details.is_empty());
+
+    let chunk: ChatSseChunk = serde_json::from_value(json!({
+        "choices": [
+            {
+                "delta": {
+                    "reasoning_details": null,
+                    "tool_calls": null
+                }
+            }
+        ]
+    }))
+    .expect("chat SSE chunk with null optional arrays deserializes");
+
+    assert!(chunk.choices[0].delta.reasoning_details.is_empty());
+    assert!(chunk.choices[0].delta.tool_calls.is_empty());
+}
+
+#[test]
 fn streamed_final_answer_requires_visible_content() {
     let provider = provider_for("deepseek").expect("DeepSeek provider is wired");
     let provider = match provider {

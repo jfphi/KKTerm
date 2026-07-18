@@ -1,4 +1,4 @@
-import type { Provider, Recipe } from "./types";
+import type { DetectedState, Provider, Recipe } from "./types";
 
 export function providerSupportsLatestVersion(provider: Provider): boolean {
   switch (provider.kind) {
@@ -26,6 +26,19 @@ export function recipeSupportsLatestVersion(recipe: Recipe): boolean {
     return githubReleasesRepoFromUrl(recipe.releaseNotesUrl) !== null;
   }
   return providerSupportsLatestVersion(recipe.provider);
+}
+
+export function recipeSupportsManagedLatestVersion(
+  recipe: Recipe,
+  detected?: DetectedState | null,
+): boolean {
+  // The catalog's latest version is actionable only through its provider.
+  // A receipt-backed standalone uv copy is real, but sending its update or
+  // uninstall through WinGet would target a different installation channel.
+  return (
+    detected?.installSource !== "officialScript" &&
+    recipeSupportsLatestVersion(recipe)
+  );
 }
 
 export function latestVersionWebUrlForRecipe(recipe: Recipe): string | null {

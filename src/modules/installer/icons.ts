@@ -87,6 +87,7 @@ const RECIPE_ICON_URLS: Record<string, string> = {
   "oh-my-posh": ohMyPosh,
   "claude-code-cli": claudeCode,
   "codex-cli": codex,
+  "cursor-cli": cursor,
   "antigravity-cli": antigravity,
   "kimi-code-cli": kimi,
   "grok-build": grok,

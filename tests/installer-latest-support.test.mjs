@@ -141,3 +141,23 @@ test("installer latest-version UI supports one-step bundles only", async () => {
     false,
   );
 });
+
+test("standalone-script installs do not use catalog-provider latest checks", async () => {
+  const { recipeSupportsManagedLatestVersion } = await importTypeScriptModule(
+    new URL("../src/modules/installer/latestSupport.ts", import.meta.url),
+  );
+  const pythonBundle = {
+    id: "python-bundle",
+    name: "Python (uv)",
+    descriptionEn: "",
+    provider: { kind: "bundle", steps: ["uv"] },
+  };
+
+  assert.equal(recipeSupportsManagedLatestVersion(pythonBundle), true);
+  assert.equal(
+    recipeSupportsManagedLatestVersion(pythonBundle, {
+      installSource: "officialScript",
+    }),
+    false,
+  );
+});

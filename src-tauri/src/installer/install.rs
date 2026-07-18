@@ -62,7 +62,12 @@ pub fn install_recipe(
         selected_install_provider(recipe, &effective_install_options(recipe, options)),
         Provider::Chocolatey { .. }
     );
-    let result = if use_selected_provider_directly {
+    let result = if recipe.id == "uv" && detect_one(recipe).is_official_script_install() {
+        // The catalog provider is WinGet, but this binary belongs to Astral's
+        // standalone channel. Keep the backend guard even though the UI hides
+        // Update so direct command callers cannot install over a different copy.
+        Err("this uv installation is managed by Astral's standalone installer; update it with `uv self update`".into())
+    } else if use_selected_provider_directly {
         install_recipe_by_provider(recipe, options, cancel, emit)
     } else if recipe.id == "n8n" || recipe.id == "flowise" || recipe.id == "openclaw" {
         if let Provider::Npm { pkg } = &recipe.provider {
@@ -2495,33 +2500,67 @@ fn refreshed_path_extras(vars: &BTreeMap<String, String>) -> Vec<String> {
     {
         extras.push(dir.to_string_lossy().to_string());
     }
-    // Astral's standalone uv installer defaults to `%USERPROFILE%\.local\bin`.
-    // Keep that directory visible to refreshed PATH probes even when the
-    // current KKTerm process still has a stale PATH snapshot.
-    for dir in standalone_uv_bin_path_candidates()
-        .into_iter()
-        .filter(|dir| dir.is_dir())
+    // Only add directories carrying Astral's receipt. Adding every default
+    // candidate unconditionally could make an unrelated `uv.exe` shadow the
+    // package-manager copy that KKTerm is supposed to manage.
+    for dir in standalone_uv_bin_path_candidates(
+        vars,
+        std::env::var_os("UV_INSTALL_DIR").as_deref(),
+        std::env::var_os("USERPROFILE").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+    .into_iter()
+    .filter(|dir| is_astral_standalone_uv_bin_dir(dir))
     {
         extras.push(dir.to_string_lossy().to_string());
     }
     extras
 }
 
-fn standalone_uv_bin_path_candidates() -> Vec<PathBuf> {
+fn standalone_uv_bin_path_candidates(
+    vars: &BTreeMap<String, String>,
+    current_uv_install_dir: Option<&std::ffi::OsStr>,
+    user_profile: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(user_profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
-        candidates.push(user_profile.join(".local").join("bin"));
+    if let Some(dir) = current_uv_install_dir {
+        candidates.push(PathBuf::from(dir));
     }
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        let home_local_bin = home.join(".local").join("bin");
-        if !candidates
-            .iter()
-            .any(|existing| existing == &home_local_bin)
-        {
-            candidates.push(home_local_bin);
+    if let Some(dir) = vars
+        .get("UV_INSTALL_DIR")
+        .filter(|dir| !dir.trim().is_empty())
+    {
+        let candidate = PathBuf::from(dir);
+        if !candidates.iter().any(|path: &PathBuf| {
+            path.to_string_lossy()
+                .eq_ignore_ascii_case(&candidate.to_string_lossy())
+        }) {
+            candidates.push(candidate);
+        }
+    }
+    for root in [user_profile, home].into_iter().flatten() {
+        let root = PathBuf::from(root);
+        for candidate in [
+            root.join(".local").join("bin"),
+            root.join(".cargo").join("bin"),
+        ] {
+            let candidate_text = candidate.to_string_lossy();
+            if !candidates
+                .iter()
+                .any(|path: &PathBuf| path.to_string_lossy().eq_ignore_ascii_case(&candidate_text))
+            {
+                candidates.push(candidate);
+            }
         }
     }
     candidates
+}
+
+fn is_astral_standalone_uv_bin_dir(dir: &std::path::Path) -> bool {
+    dir.join(format!("uv{}", std::env::consts::EXE_SUFFIX))
+        .is_file()
+        && dir.join("uv-receipt.json").is_file()
 }
 
 fn git_cmd_path_candidates() -> Vec<PathBuf> {
@@ -3298,14 +3337,26 @@ mod tests {
     }
 
     #[test]
-    fn standalone_uv_bin_path_includes_user_local_bin() {
-        let candidates = standalone_uv_bin_path_candidates();
-        assert!(
-            candidates
-                .iter()
-                .any(|path| path.ends_with(std::path::Path::new(".local").join("bin"))),
-            "expected %USERPROFILE%\\.local\\bin among {candidates:?}"
-        );
+    fn standalone_uv_path_extra_requires_receipt_and_supports_custom_install_dir() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let custom_bin = temp.path().join("custom-uv");
+        std::fs::create_dir(&custom_bin).unwrap();
+        std::fs::write(
+            custom_bin.join(format!("uv{}", std::env::consts::EXE_SUFFIX)),
+            b"test",
+        )
+        .unwrap();
+        let vars = BTreeMap::from([(
+            "UV_INSTALL_DIR".to_string(),
+            custom_bin.to_string_lossy().into_owned(),
+        )]);
+
+        let candidates = standalone_uv_bin_path_candidates(&vars, None, None, None);
+        assert_eq!(candidates, vec![custom_bin.clone()]);
+        assert!(!is_astral_standalone_uv_bin_dir(&custom_bin));
+
+        std::fs::write(custom_bin.join("uv-receipt.json"), b"{}").unwrap();
+        assert!(is_astral_standalone_uv_bin_dir(&custom_bin));
     }
 
     #[test]

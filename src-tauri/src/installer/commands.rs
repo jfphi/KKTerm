@@ -983,41 +983,13 @@ fn terminal_launch_affordance(tool_id: &str) -> Option<TerminalLaunchAffordance>
                 "oh-my-posh font install  —  install a Nerd Font",
             ],
         ),
-        "claude-code-cli" => plain(
-            "claude",
-            &[
-                "claude  —  start Claude Code in this directory",
-                "claude --help  —  list commands and flags",
-            ],
-        ),
-        "codex-cli" => plain(
-            "codex",
-            &[
-                "codex  —  start Codex in this directory",
-                "codex --help  —  list commands and flags",
-            ],
-        ),
-        "kimi-code-cli" => plain(
-            "kimi",
-            &[
-                "kimi  —  start Kimi Code in this directory",
-                "kimi --help  —  list commands and flags",
-            ],
-        ),
-        "grok-build" => plain(
-            "grok",
-            &[
-                "grok  —  start Grok Build in this directory",
-                "grok --help  —  list commands and flags",
-            ],
-        ),
-        "opencode" => plain(
-            "opencode",
-            &[
-                "opencode  —  start OpenCode in this directory",
-                "opencode --help  —  list commands and flags",
-            ],
-        ),
+        "antigravity-cli" => plain("agy", &[]),
+        "claude-code-cli" => plain("claude", &[]),
+        "codex-cli" => plain("codex", &[]),
+        "cursor-cli" => plain("agent", &[]),
+        "kimi-code-cli" => plain("kimi", &[]),
+        "grok-build" => plain("grok", &[]),
+        "opencode" => plain("opencode", &[]),
         "rustup" => plain(
             "rustup show",
             &[
@@ -1125,15 +1097,33 @@ fn terminal_launch_affordance(tool_id: &str) -> Option<TerminalLaunchAffordance>
 pub async fn installer_open_terminal_launcher(
     tool_id: String,
     path: Option<String>,
+    arguments: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let affordance = terminal_launch_affordance(&tool_id)
+        let mut affordance = terminal_launch_affordance(&tool_id)
             .ok_or_else(|| format!("tool `{tool_id}` does not have a terminal launcher"))?;
+        if let Some(arguments) = validated_launcher_arguments(arguments.as_deref())? {
+            affordance.prefill.push(' ');
+            affordance.prefill.push_str(&arguments);
+        }
         let working_dir = path.as_deref().map(validated_launch_dir).transpose()?;
         spawn_terminal_launcher(&affordance, working_dir.as_deref())
     })
     .await
     .map_err(|error| format!("failed to open terminal launcher: {error}"))?
+}
+
+fn validated_launcher_arguments(arguments: Option<&str>) -> Result<Option<String>, String> {
+    let Some(arguments) = arguments.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if arguments.len() > 4096 {
+        return Err("launcher arguments are too long".into());
+    }
+    if arguments.chars().any(|ch| matches!(ch, '\r' | '\n' | '\0')) {
+        return Err("launcher arguments must be a single line".into());
+    }
+    Ok(Some(arguments.to_string()))
 }
 
 /// Validate a launcher working directory: absolute and existing, so a stale
@@ -1167,9 +1157,9 @@ enum GuiLaunchCandidate {
     Appx(&'static str),
 }
 
-/// Curated executable candidates for installed GUI apps that the tile-level
-/// Run button can start directly. This closed per-tool allow-list is the only
-/// set of programs `installer_launch_app` will spawn.
+/// Curated automatic executable candidates for installed GUI apps that the
+/// tile-level Run button can start directly. An explicitly user-selected,
+/// validated per-tool path may be tried only after this closed list fails.
 fn gui_launch_affordance(tool_id: &str) -> Vec<GuiLaunchCandidate> {
     use GuiLaunchCandidate::{Appx, Command, Path};
     match tool_id {
@@ -1282,17 +1272,33 @@ fn gui_launch_affordance(tool_id: &str) -> Vec<GuiLaunchCandidate> {
 }
 
 /// Launch an installed GUI app from the tile-level Run button. Resolves the
-/// curated candidate list in order and starts the first hit detached, at
-/// normal (non-elevated) integrity. Waits only for the short resolver script,
-/// not the launched app, so failures surface as an error message.
+/// curated candidate list in order, then an optional user-selected path, and
+/// starts the first hit detached at normal (non-elevated) integrity. Returns
+/// false when nothing resolves so the frontend can offer the native picker.
 #[tauri::command]
-pub async fn installer_launch_app(tool_id: String) -> Result<(), String> {
+pub async fn installer_launch_app(
+    runtime: State<'_, InstallerRuntime>,
+    tool_id: String,
+    custom_path: Option<String>,
+) -> Result<bool, String> {
+    let catalog = runtime
+        .catalog
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("catalog not loaded yet — call installer_load_catalog first")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let recipe = find_recipe(&catalog, &tool_id)
+            .ok_or_else(|| format!("tool `{tool_id}` is not in the installer catalog"))?;
         let candidates = gui_launch_affordance(&tool_id);
         if candidates.is_empty() {
             return Err(format!("tool `{tool_id}` does not have an app launcher"));
         }
-        run_gui_launch(&tool_id, &candidates)
+        let custom_path = custom_path
+            .as_deref()
+            .map(validated_custom_gui_launcher)
+            .transpose()?;
+        run_gui_launch(recipe, &candidates, custom_path)
     })
     .await
     .map_err(|error| format!("failed to launch app: {error}"))?
@@ -1301,11 +1307,89 @@ pub async fn installer_launch_app(tool_id: String) -> Result<(), String> {
 /// PowerShell that tries each candidate in order and starts the first hit.
 /// `Start-Process` gets the executable's own directory as the working
 /// directory because some apps (e.g. OBS Studio) refuse to start elsewhere.
-fn build_gui_launch_ps_command(candidates: &[GuiLaunchCandidate]) -> String {
+fn build_gui_launch_ps_command(
+    recipe: &Recipe,
+    candidates: &[GuiLaunchCandidate],
+    custom_path: Option<&Path>,
+) -> String {
+    let provider_id = match &recipe.provider {
+        Provider::Winget { id } => id.as_str(),
+        _ => "",
+    };
+    let mut display_names = recipe.detection.display_names.clone();
+    if !display_names
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(&recipe.name))
+    {
+        display_names.push(recipe.name.clone());
+    }
+    let ps_array = |values: &[String]| {
+        format!(
+            "@({})",
+            values
+                .iter()
+                .map(|value| ps_single_quote(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let mut allowed_executable_names = candidates
+        .iter()
+        .filter_map(|candidate| match candidate {
+            GuiLaunchCandidate::Command(command) | GuiLaunchCandidate::Path(command) => {
+                command.rsplit('\\').next()
+            }
+            GuiLaunchCandidate::Appx(_) => None,
+        })
+        .flat_map(|name| {
+            let mut names = vec![name.to_string()];
+            if !name.to_ascii_lowercase().ends_with(".exe") {
+                names.push(format!("{name}.exe"));
+            }
+            names
+        })
+        .collect::<Vec<_>>();
+    allowed_executable_names.sort_by_key(|name| name.to_ascii_lowercase());
+    allowed_executable_names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     let mut parts: Vec<String> = vec![
         "$ErrorActionPreference = 'SilentlyContinue'".into(),
         "function Start-Hit([string]$exe) { Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe); exit 0 }".into(),
+        "function Start-AppId([string]$appId) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('shell:AppsFolder\\' + $appId); exit 0 }".into(),
+        r#"function Get-DisplayIconExe([string]$value) { if (-not $value) { return $null }; $expanded = [Environment]::ExpandEnvironmentVariables($value.Trim()); if ($expanded -match '^\s*"([^"]+?\.exe)"') { return $Matches[1] }; if ($expanded -match '^\s*([^,]+?\.exe)(?:,|$)') { return $Matches[1].Trim() }; return $null }"#.into(),
+        "function Test-AllowedExe([string]$exe) { if (-not $exe) { return $false }; $leaf = [IO.Path]::GetFileName($exe); return ($allowedExeNames | Where-Object { $leaf -ieq $_ }).Count -gt 0 }".into(),
+        "function Test-LaunchableAppId([string]$appId) { if (-not $appId -or $appId -match '^(?i)https?://' -or $appId -match '(?i)\\.(chm|url|html?)$') { return $false }; if ($appId -match '(?i)\\.exe$') { return (Test-AllowedExe $appId) }; return $true }".into(),
+        "function Get-VersionSortKey([string]$value) { $parts = @([regex]::Matches($value, '\\d+') | Select-Object -First 4 | ForEach-Object { try { '{0:D12}' -f [int64]$_.Value } catch { '000000000000' } }); return ($parts -join '.') }".into(),
+        format!(
+            "$allowedExeNames = {}",
+            ps_array(&allowed_executable_names)
+        ),
+        format!("$displayNames = {}", ps_array(&display_names)),
+        format!(
+            "$displayPrefixes = {}",
+            ps_array(&recipe.detection.display_name_prefixes)
+        ),
+        format!(
+            "$registryKeys = {}",
+            ps_array(&recipe.detection.registry_keys)
+        ),
+        format!("$wingetId = {}", ps_single_quote(provider_id)),
     ];
+
+    for family in &recipe.detection.appx_package_family_names {
+        let escaped = family.replace('\'', "''");
+        parts.push(format!(
+            "$pkg = Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object {{ $_.PackageFamilyName -ieq '{escaped}' }} | Select-Object -First 1; \
+             if ($pkg) {{ $appId = (Get-AppxPackageManifest $pkg).Package.Applications.Application | Select-Object -First 1 -ExpandProperty Id; \
+             if ($appId) {{ Start-AppId ($pkg.PackageFamilyName + '!' + $appId) }} }}"
+        ));
+    }
+
+    parts.push(
+        "$startApps = @(Get-StartApps -ErrorAction SilentlyContinue); $startMatches = @($startApps | Where-Object { $name = $_.Name; (($displayNames | Where-Object { $name -ieq $_ }).Count -gt 0) -and (Test-LaunchableAppId $_.AppID) }); if ($startMatches.Count -eq 1) { Start-AppId $startMatches[0].AppID }; $startMatches = @($startApps | Where-Object { $name = $_.Name; ((($displayNames | Where-Object { $name -ieq $_ }).Count -gt 0) -or (($displayPrefixes | Where-Object { $name -and $name.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0)) -and (Test-LaunchableAppId $_.AppID) }); if ($startMatches.Count -eq 1) { Start-AppId $startMatches[0].AppID }".into(),
+    );
+    parts.push(
+        "$uninstallRoots = @('Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'Registry::HKEY_CURRENT_USER\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'Registry::HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'Registry::HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'); $registrations = @(Get-ItemProperty -Path $uninstallRoots -ErrorAction SilentlyContinue | Where-Object { $child = $_.PSChildName; $name = $_.DisplayName; ($registryKeys | Where-Object { $child -ieq $_ }).Count -gt 0 -or ($wingetId -and ($child -ieq $wingetId -or ($child -ilike ($wingetId + '_*Microsoft.Winget.Source*')))) -or ($displayNames | Where-Object { $name -ieq $_ -or $name -ieq ($_ + ' (User)') }).Count -gt 0 -or ($displayPrefixes | Where-Object { $name -and $name.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 } | Sort-Object -Property @{ Expression = { Get-VersionSortKey $_.DisplayVersion }; Descending = $true }); foreach ($registration in $registrations) { $exe = Get-DisplayIconExe $registration.DisplayIcon; if ((Test-AllowedExe $exe) -and (Test-Path -LiteralPath $exe -PathType Leaf)) { Start-Hit $exe }; if ($registration.InstallLocation) { foreach ($name in $allowedExeNames) { $exe = Join-Path ([Environment]::ExpandEnvironmentVariables($registration.InstallLocation)) $name; if (Test-Path -LiteralPath $exe -PathType Leaf) { Start-Hit $exe } } } }".into(),
+    );
     for candidate in candidates {
         match candidate {
             GuiLaunchCandidate::Path(path) => {
@@ -1338,13 +1422,48 @@ fn build_gui_launch_ps_command(candidates: &[GuiLaunchCandidate]) -> String {
             }
         }
     }
+    if let Some(path) = custom_path {
+        parts.push(format!(
+            "$custom = {}; if (Test-Path -LiteralPath $custom -PathType Leaf) {{ Start-Hit $custom }}",
+            ps_single_quote(&path.to_string_lossy())
+        ));
+    }
     parts.push("exit 1".into());
     parts.join("; ")
 }
 
+fn validated_custom_gui_launcher(path: &str) -> Result<&Path, String> {
+    let path = Path::new(path.trim());
+    if !path.is_absolute() {
+        return Err("custom app launcher path must be absolute".into());
+    }
+    if !path.is_file() {
+        return Err("custom app launcher path does not exist or is not a file".into());
+    }
+    if !is_supported_custom_gui_launcher(path) {
+        return Err("custom app launcher must be an executable or .lnk shortcut".into());
+    }
+    Ok(path)
+}
+
+fn is_supported_custom_gui_launcher(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "exe" | "com" | "bat" | "cmd" | "lnk"
+    )
+}
+
 #[cfg(target_os = "windows")]
-fn run_gui_launch(tool_id: &str, candidates: &[GuiLaunchCandidate]) -> Result<(), String> {
-    let ps = build_gui_launch_ps_command(candidates);
+fn run_gui_launch(
+    recipe: &Recipe,
+    candidates: &[GuiLaunchCandidate],
+    custom_path: Option<&Path>,
+) -> Result<bool, String> {
+    let ps = build_gui_launch_ps_command(recipe, candidates, custom_path);
     let mut cmd = Command::new("powershell");
     cmd.args([
         "-NoProfile",
@@ -1364,15 +1483,16 @@ fn run_gui_launch(tool_id: &str, candidates: &[GuiLaunchCandidate]) -> Result<()
     }
     let output = cmd
         .output()
-        .map_err(|error| format!("failed to launch `{tool_id}`: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("could not locate an executable for `{tool_id}`"));
-    }
-    Ok(())
+        .map_err(|error| format!("failed to launch `{}`: {error}", recipe.id))?;
+    Ok(output.status.success())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn run_gui_launch(_tool_id: &str, _candidates: &[GuiLaunchCandidate]) -> Result<(), String> {
+fn run_gui_launch(
+    _recipe: &Recipe,
+    _candidates: &[GuiLaunchCandidate],
+    _custom_path: Option<&Path>,
+) -> Result<bool, String> {
     Err("app launch is only available on Windows".into())
 }
 
@@ -2902,8 +3022,12 @@ mod tests {
             "wsl",
             "nssm",
             "oh-my-posh",
+            "antigravity-cli",
             "claude-code-cli",
             "codex-cli",
+            "cursor-cli",
+            "kimi-code-cli",
+            "grok-build",
             "opencode",
             "rustup",
             "bun",
@@ -2922,9 +3046,22 @@ mod tests {
                 !affordance.prefill.is_empty(),
                 "`{tool_id}` launcher should prefill a starter command"
             );
+        }
+        for tool_id in [
+            "antigravity-cli",
+            "claude-code-cli",
+            "codex-cli",
+            "cursor-cli",
+            "kimi-code-cli",
+            "grok-build",
+            "opencode",
+        ] {
             assert!(
-                !affordance.hints.is_empty(),
-                "`{tool_id}` launcher should show sample usage hints"
+                terminal_launch_affordance(tool_id)
+                    .expect("coding agent launcher")
+                    .hints
+                    .is_empty(),
+                "coding-agent launchers should use option controls instead of samples"
             );
         }
         assert!(
@@ -2966,6 +3103,7 @@ mod tests {
                 "`{tool_id}` should expose GUI launch candidates"
             );
         }
+
         // CLI tools and unknown ids resolve to nothing.
         assert!(gui_launch_affordance("git").is_empty());
         assert!(gui_launch_affordance("ripgrep").is_empty());
@@ -2973,12 +3111,31 @@ mod tests {
     }
 
     #[test]
+    fn terminal_launcher_arguments_are_bounded_and_single_line() {
+        assert_eq!(
+            validated_launcher_arguments(Some("  --auto --model test  ")),
+            Ok(Some("--auto --model test".into()))
+        );
+        assert_eq!(validated_launcher_arguments(Some("  ")), Ok(None));
+        assert!(validated_launcher_arguments(Some("--auto\nwhoami")).is_err());
+        assert!(validated_launcher_arguments(Some(&"x".repeat(4097))).is_err());
+    }
+
+    #[test]
     fn gui_launch_ps_resolves_paths_commands_and_appx() {
-        let command = build_gui_launch_ps_command(&[
-            GuiLaunchCandidate::Path("%ProgramFiles%\\Blender Foundation\\Blender *\\blender.exe"),
-            GuiLaunchCandidate::Command("chrome.exe"),
-            GuiLaunchCandidate::Appx("OpenAI.Codex"),
-        ]);
+        let catalog = load_bundled_catalog().expect("bundled catalog");
+        let recipe = find_recipe(&catalog, "blender").expect("Blender recipe");
+        let command = build_gui_launch_ps_command(
+            recipe,
+            &[
+                GuiLaunchCandidate::Path(
+                    "%ProgramFiles%\\Blender Foundation\\Blender *\\blender.exe",
+                ),
+                GuiLaunchCandidate::Command("chrome.exe"),
+                GuiLaunchCandidate::Appx("OpenAI.Codex"),
+            ],
+            None,
+        );
 
         // Env tokens expand at resolve time; globs pick the highest match.
         assert!(command.contains("[Environment]::ExpandEnvironmentVariables"));
@@ -2986,6 +3143,12 @@ mod tests {
         // Bare names consult PATH and the App Paths registry.
         assert!(command.contains("Get-Command 'chrome.exe'"));
         assert!(command.contains("App Paths\\chrome.exe"));
+        // Prefer authoritative Windows app registrations over fallback paths.
+        assert!(command.contains("Get-StartApps"));
+        assert!(command.contains("DisplayIcon"));
+        assert!(command.contains("Test-AllowedExe"));
+        assert!(command.contains("Test-LaunchableAppId"));
+        assert!(command.contains("Get-VersionSortKey"));
         // Store apps launch through shell:AppsFolder.
         assert!(command.contains("Get-AppxPackage -Name 'OpenAI.Codex'"));
         assert!(command.contains("shell:AppsFolder"));
@@ -2993,6 +3156,101 @@ mod tests {
         assert!(command.contains("-WorkingDirectory (Split-Path -Parent $exe)"));
         // No hit is an error the frontend can surface.
         assert!(command.ends_with("exit 1"));
+    }
+
+    #[test]
+    fn custom_gui_launchers_accept_windows_executables_and_shortcuts_only() {
+        for path in ["tool.exe", "tool.COM", "tool.bat", "tool.cmd", "tool.lnk"] {
+            assert!(is_supported_custom_gui_launcher(Path::new(path)), "{path}");
+        }
+        for path in ["tool.ps1", "tool.msi", "tool.url", "tool.txt"] {
+            assert!(!is_supported_custom_gui_launcher(Path::new(path)), "{path}");
+        }
+        assert!(validated_custom_gui_launcher("relative.exe").is_err());
+        let existing = std::env::temp_dir().join(format!(
+            "kkterm-custom-launcher-test-{}.exe",
+            std::process::id()
+        ));
+        std::fs::write(&existing, []).expect("create launcher fixture");
+        assert!(validated_custom_gui_launcher(&existing.to_string_lossy()).is_ok());
+        std::fs::remove_file(existing).expect("remove launcher fixture");
+    }
+
+    #[test]
+    fn custom_gui_launcher_is_the_final_resolver_candidate() {
+        let catalog = load_bundled_catalog().expect("bundled catalog");
+        let recipe = find_recipe(&catalog, "obsidian").expect("Obsidian recipe");
+        let command = build_gui_launch_ps_command(
+            recipe,
+            &gui_launch_affordance("obsidian"),
+            Some(Path::new(r"C:\Custom Apps\Obsidian.lnk")),
+        );
+        let custom = command
+            .rfind("C:\\Custom Apps\\Obsidian.lnk")
+            .expect("custom path in script");
+        let automatic = command
+            .rfind("%LOCALAPPDATA%")
+            .expect("automatic candidates in script");
+        assert!(custom > automatic);
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn all_gui_launch_scripts_parse_in_windows_powershell() {
+        let catalog = load_bundled_catalog().expect("bundled catalog");
+        for tool_id in [
+            "vscode",
+            "cursor",
+            "notepadpp",
+            "docker-desktop",
+            "comfyui",
+            "lmstudio",
+            "bruno",
+            "claude-desktop",
+            "codex-desktop",
+            "powertoys",
+            "powershell-7",
+            "everything",
+            "ditto",
+            "keepassxc",
+            "7zip",
+            "sharex",
+            "tailscale",
+            "rustdesk",
+            "google-chrome",
+            "firefox",
+            "acrobat-reader",
+            "obsidian",
+            "drawio",
+            "krita",
+            "inkscape",
+            "blender",
+            "pencil",
+            "vlc",
+            "obs-studio",
+            "xnview-mp",
+            "audacity",
+            "vcxsrv",
+        ] {
+            let recipe = find_recipe(&catalog, tool_id).expect("GUI recipe");
+            let custom_path =
+                (tool_id == "obsidian").then(|| Path::new(r"C:\Custom Apps\Selected Launcher.lnk"));
+            let script =
+                build_gui_launch_ps_command(recipe, &gui_launch_affordance(tool_id), custom_path);
+            let parse_only = format!(
+                "$null = [ScriptBlock]::Create({})",
+                ps_single_quote(&script)
+            );
+            let output = Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &parse_only])
+                .output()
+                .expect("Windows PowerShell should be available");
+            assert!(
+                output.status.success(),
+                "{tool_id} launch script should parse: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]

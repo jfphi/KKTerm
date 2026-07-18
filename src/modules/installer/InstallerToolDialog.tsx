@@ -28,11 +28,15 @@ import {
 } from "./dag";
 import { iconUrlForRecipe, FALLBACK_ICON_URL } from "./icons";
 import {
+  cliLaunchCommandForRecipe,
   cliLaunchSamplesForRecipe,
   cliLauncherUsesProjectFolders,
+  codingAgentLaunchOptionsForRecipe,
+  readCodingAgentLaunchSettings,
   readRecentLaunchFolders,
   rememberLaunchFolder,
   suiteTerminalIsElevated,
+  writeCodingAgentLaunchSettings,
 } from "./launch";
 import { InstallerConfirmDialog } from "./InstallerConfirmDialog";
 import { installRecipeAndWait } from "./progress";
@@ -42,6 +46,7 @@ import { notifyConnectionTreeInvalidated } from "../workspace/connections/connec
 import { isInstallerUpdateAvailable } from "./versionCompare";
 import {
   latestVersionWebUrlForRecipe,
+  recipeSupportsManagedLatestVersion,
   recipeSupportsLatestVersion,
 } from "./latestSupport";
 import {
@@ -135,13 +140,14 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
     recipe.descriptionLocales?.[i18n.language] ?? recipe.descriptionEn;
   const version = detected?.installedVersion ?? null;
   const latest = toolState?.latestVersionSeen ?? null;
-  const supportsLatestVersion = recipeSupportsLatestVersion(recipe);
+  const supportsLatestVersion = recipeSupportsManagedLatestVersion(
+    recipe,
+    detected,
+  );
   const latestWebUrl = latestVersionWebUrlForRecipe(recipe);
   const officialScript = isOfficialScriptInstall(detected);
   const hasUpdate =
-    !officialScript &&
-    supportsLatestVersion &&
-    isInstallerUpdateAvailable(latest, version);
+    supportsLatestVersion && isInstallerUpdateAvailable(latest, version);
   const webUi = webUiAffordanceForRecipe(recipe);
   const hasWebUi = webUi !== null;
   const service = serviceAffordanceForRecipe(recipe);
@@ -441,7 +447,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
               {version}
             </Row>
           ) : null}
-          {!officialScript && supportsLatestVersion ? (
+          {supportsLatestVersion ? (
             <Row label={t("installer.dialog.latestVersion")}>
               <LatestVersionValue
                 error={latestError}
@@ -455,7 +461,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
               <ExternalLink href={latestWebUrl}>{t("installer.status.web")}</ExternalLink>
             </Row>
           ) : null}
-          {!officialScript && supportsLatestVersion && toolState?.lastCheckAt ? (
+          {supportsLatestVersion && toolState?.lastCheckAt ? (
             <Row label={t("installer.dialog.lastChecked")}>
               {formatTimestamp(toolState.lastCheckAt)}
             </Row>
@@ -482,7 +488,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
               {webUiStatus.startup ?? t("installer.status.unknown")}
             </Row>
           ) : null}
-          {terminalLaunch ? (
+          {terminalLaunch && terminalLaunch.hints.length > 0 ? (
             <Row label={t("installer.dialog.runHints")}>
               <span style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
                 {terminalLaunch.hints.map((hint, i) => (
@@ -556,7 +562,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
             </ul>
           </div>
         ) : null}
-        {supportsLatestVersion && !officialScript ? (
+        {supportsLatestVersion ? (
           <label className="installer-tool-dialog__pin">
             <span>{t("installer.options.pinVersion")}</span>
             <ToggleSwitch
@@ -569,13 +575,18 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
         extraLeft={<>
-        <button
-          type="button"
-          className="secondary-button danger"
-          onClick={attemptUninstall}
-        >
-          {t("installer.actions.uninstall")}
-        </button>
+        {/* The receipt proves this is Astral's install, not that WinGet owns
+            it. Hide destructive catalog-provider actions for the same reason
+            updates are suppressed: the backend must not target another copy. */}
+        {!officialScript ? (
+          <button
+            type="button"
+            className="secondary-button danger"
+            onClick={attemptUninstall}
+          >
+            {t("installer.actions.uninstall")}
+          </button>
+        ) : null}
         {isWsl ? (
           <button
             type="button"
@@ -1157,7 +1168,11 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
     (state) => state.showStatusBarNotice,
   );
   const samples = cliLaunchSamplesForRecipe(recipe.id) ?? [];
+  const codingAgentOptions = codingAgentLaunchOptionsForRecipe(recipe.id);
   const usesProjectFolders = cliLauncherUsesProjectFolders(recipe.id);
+  const [launchSettings, setLaunchSettings] = useState(() =>
+    readCodingAgentLaunchSettings(recipe.id),
+  );
   const [recentFolders, setRecentFolders] = useState<string[]>(() =>
     usesProjectFolders ? readRecentLaunchFolders(recipe.id) : [],
   );
@@ -1165,6 +1180,17 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
   const visibleFolders = showAllFolders
     ? recentFolders
     : recentFolders.slice(0, RECENT_LAUNCH_FOLDERS_VISIBLE);
+  const launchArguments = [launchSettings.preset, launchSettings.arguments.trim()]
+    .filter(Boolean)
+    .join(" ");
+
+  function updateLaunchSettings(
+    next: Partial<{ preset: string; arguments: string }>,
+  ) {
+    const settings = { ...launchSettings, ...next };
+    setLaunchSettings(settings);
+    writeCodingAgentLaunchSettings(recipe.id, settings);
+  }
 
   async function openTerminal(folder?: string) {
     if (!isTauriRuntime()) return;
@@ -1172,6 +1198,7 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
       await invokeCommand("installer_open_terminal_launcher", {
         toolId: recipe.id,
         ...(folder ? { path: folder } : {}),
+        ...(launchArguments ? { arguments: launchArguments } : {}),
       });
       if (folder) {
         setRecentFolders(rememberLaunchFolder(recipe.id, folder));
@@ -1232,15 +1259,52 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
             ) : null}
           </div>
         ) : null}
-        <dl className="installer-tool-dialog__grid">
-          <Row label={t("installer.launcher.samples")}>
-            <span style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
-              {samples.map((sample, i) => (
-                <code key={i}>{sample}</code>
-              ))}
-            </span>
-          </Row>
-        </dl>
+        {codingAgentOptions ? (
+          <div className="installer-launcher__options">
+            <label className="installer-launcher__field">
+              <span>{t("installer.launcher.commonOption")}</span>
+              <select
+                value={launchSettings.preset}
+                onChange={(event) =>
+                  updateLaunchSettings({ preset: event.target.value })
+                }
+              >
+                <option value="">{t("installer.launcher.defaultOption")}</option>
+                {codingAgentOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="installer-launcher__field">
+              <span>{t("installer.launcher.arguments")}</span>
+              <input
+                type="text"
+                autoCapitalize="off"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                value={launchSettings.arguments}
+                onChange={(event) =>
+                  updateLaunchSettings({ arguments: event.target.value })
+                }
+              />
+            </label>
+          </div>
+        ) : (
+          <dl className="installer-tool-dialog__grid">
+            <Row label={t("installer.launcher.samples")}>
+              <span
+                style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}
+              >
+                {samples.map((sample, i) => (
+                  <code key={i}>{sample}</code>
+                ))}
+              </span>
+            </Row>
+          </dl>
+        )}
       </div>
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
@@ -1724,8 +1788,8 @@ function workspaceConnectionSpecForRecipe(
 function terminalLaunchAffordanceForRecipe(
   recipe: Recipe,
 ): { hints: string[] } | null {
-  const hints = cliLaunchSamplesForRecipe(recipe.id);
-  return hints ? { hints } : null;
+  if (!cliLaunchCommandForRecipe(recipe.id)) return null;
+  return { hints: cliLaunchSamplesForRecipe(recipe.id) ?? [] };
 }
 
 function serviceAffordanceForRecipe(recipe: Recipe): { name: string } | null {

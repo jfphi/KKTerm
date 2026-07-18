@@ -12,12 +12,8 @@ export type ProviderKind =
   | "wslDistro"
   | "bundle";
 
-/// Detected install provenance that is not itself an install/update provider.
-/// Astral's standalone `install.ps1` is recognized this way so the UI can
-/// label it and refuse WinGet-backed updates.
+/** Detected provenance that is not itself an install/update provider. */
 export type DetectedInstallSource = "officialScript";
-
-export type DetectedInstallProvider = ProviderKind | DetectedInstallSource;
 
 export type GithubReleaseLayout = "zip" | "exeInstaller" | "msi";
 
@@ -115,17 +111,20 @@ export interface DetectedState {
   /// this carries the managed Node/Python runtime version.
   runtimeVersion?: string | null;
   /// Best-effort provider that detected and will manage this installed tool.
-  /// May also be a non-provider source marker such as `officialScript`.
-  installProvider?: DetectedInstallProvider | null;
+  installProvider?: ProviderKind | null;
+  /// Provenance for an install KKTerm can recognize but cannot safely manage
+  /// through the catalog provider. Kept separate from installProvider so an
+  /// official script is never accidentally treated as a WinGet provider.
+  installSource?: DetectedInstallSource | null;
   /// Unix timestamp from the last completed detection pass. Cached Windows
   /// registry snapshots use this so the tile can show how stale it is.
   lastCheckedAt?: number | null;
 }
 
 export function isOfficialScriptInstall(
-  detected?: Pick<DetectedState, "installProvider"> | null,
+  detected?: Pick<DetectedState, "installSource"> | null,
 ): boolean {
-  return detected?.installProvider === "officialScript";
+  return detected?.installSource === "officialScript";
 }
 
 export interface ToolState {

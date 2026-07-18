@@ -860,6 +860,36 @@
       }
     },
     {
+      "id": "cursor-cli",
+      "name": "Cursor Agent CLI",
+      "section": "aiAgents",
+      "descriptionEn": "Cursor's official command-line coding agent, installed with the native Windows PowerShell installer.",
+      "category": "ai-agent",
+      "icon": "Bot",
+      "homepage": "https://cursor.com/cli",
+      "provider": {
+        "kind": "downloadInstaller",
+        "url": "https://cursor.com/install?win32=true",
+        "fileName": "cursor-agent-install.ps1"
+      },
+      "options": [],
+      "descriptionLocales": {
+        "fr": "Agent de codage officiel en ligne de commande de Cursor, installé avec le programme d’installation PowerShell natif pour Windows.",
+        "de": "Offizieller Kommandozeilen-Coding-Agent von Cursor, installiert mit dem nativen Windows-PowerShell-Installationsprogramm.",
+        "it": "Agente di programmazione ufficiale da riga di comando di Cursor, installato con il programma di installazione PowerShell nativo per Windows.",
+        "es-MX": "Agente de programación oficial de línea de comandos de Cursor, instalado con el instalador nativo de PowerShell para Windows.",
+        "es": "Agente de programación oficial de línea de comandos de Cursor, instalado con el instalador nativo de PowerShell para Windows.",
+        "pt-BR": "Agente de programação oficial de linha de comando do Cursor, instalado com o instalador PowerShell nativo para Windows.",
+        "zh-CN": "Cursor 官方命令行编程代理，通过原生 Windows PowerShell 安装程序安装。",
+        "zh-TW": "Cursor 官方命令列程式開發代理，透過原生 Windows PowerShell 安裝程式安裝。",
+        "ja": "Cursor の公式コマンドラインコーディングエージェント。Windows 用のネイティブ PowerShell インストーラーでインストールされます。",
+        "ko": "Cursor의 공식 명령줄 코딩 에이전트로, Windows용 네이티브 PowerShell 설치 프로그램으로 설치됩니다.",
+        "vi": "Tác nhân lập trình dòng lệnh chính thức của Cursor, được cài đặt bằng trình cài đặt PowerShell gốc dành cho Windows.",
+        "id": "Agen pengodean baris perintah resmi Cursor, dipasang dengan penginstal PowerShell native untuk Windows.",
+        "th": "เอเจนต์เขียนโค้ดผ่านบรรทัดคำสั่งอย่างเป็นทางการของ Cursor ซึ่งติดตั้งด้วยโปรแกรมติดตั้ง PowerShell แบบเนทีฟสำหรับ Windows"
+      }
+    },
+    {
       "id": "kimi-code-cli",
       "name": "Kimi Code CLI",
       "section": "aiAgents",

@@ -6,7 +6,9 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::detect::{detect_chocolatey_package, detect_npm_provider, github_release_marker_path};
+use super::detect::{
+    detect_chocolatey_package, detect_npm_provider, detect_one, github_release_marker_path,
+};
 use super::proc::no_window;
 use super::schema::{Catalog, Provider, Recipe};
 
@@ -63,8 +65,17 @@ pub fn latest_version_in_catalog(recipe: &Recipe, catalog: &Catalog) -> LatestVe
                 .iter()
                 .find(|r| r.id == steps[0])
                 .ok_or_else(|| format!("bundle step `{}` not found", steps[0]))?;
+            if child.id == "uv" && detect_one(child).is_official_script_install() {
+                // The frontend normally filters this request, but the backend
+                // must independently avoid caching a WinGet latest version for
+                // a bundle whose manager came from Astral's standalone channel.
+                return Ok(None);
+            }
             return latest_version(child);
         }
+        return Ok(None);
+    }
+    if recipe.id == "uv" && detect_one(recipe).is_official_script_install() {
         return Ok(None);
     }
     latest_version(recipe)
