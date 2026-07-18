@@ -961,6 +961,15 @@
       "launch": "Launch",
       "noMatches": "No tools match your search."
     },
+    "launcher": {
+      "title": "Run {{name}}",
+      "body": "{{name}} is a command-line tool that runs in a terminal window.",
+      "samples": "Sample commands",
+      "openTerminal": "Open terminal",
+      "recentFolders": "Recent folders",
+      "chooseFolder": "Choose folder…",
+      "showMore": "Show more"
+    },
     "stepper": {
       "failedBadge": "Failed"
     },

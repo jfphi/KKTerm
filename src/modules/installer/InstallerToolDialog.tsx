@@ -16,6 +16,7 @@ import {
   invokeCommand,
   isTauriRuntime,
   openExternalUrl,
+  selectInstallerLaunchFolder,
 } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
 import {
@@ -26,6 +27,13 @@ import {
   resolveInstallPlan,
 } from "./dag";
 import { iconUrlForRecipe, FALLBACK_ICON_URL } from "./icons";
+import {
+  cliLaunchSamplesForRecipe,
+  cliLauncherUsesProjectFolders,
+  readRecentLaunchFolders,
+  rememberLaunchFolder,
+  suiteTerminalIsElevated,
+} from "./launch";
 import { InstallerConfirmDialog } from "./InstallerConfirmDialog";
 import { installRecipeAndWait } from "./progress";
 import { ToggleSwitch } from "../settings/ToggleSwitch";
@@ -75,6 +83,8 @@ export function InstallerToolDialog() {
       >
         {open.mode === "stepper" ? (
           <StepperBody recipe={recipe} />
+        ) : open.mode === "launcher" ? (
+          <LauncherBody recipe={recipe} />
         ) : (
           <InfoBody recipe={recipe} />
         )}
@@ -100,6 +110,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
   const detected = useInstallerStore((s) => s.detected[recipe.id]);
   const toolState = useInstallerStore((s) => s.toolState[recipe.id]);
   const latestError = useInstallerStore((s) => s.checkError[recipe.id]);
+  const checking = useInstallerStore((s) => s.checking);
   const allDetected = useInstallerStore((s) => s.detected);
   const catalog = useInstallerStore((s) => s.catalog);
   const closeDialog = useInstallerStore((s) => s.closeDialog);
@@ -198,6 +209,18 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
       useInstallerStore.getState().setToolStates(states);
     } catch {
       // ignore — non-fatal
+    }
+  }
+
+  async function handleRefreshLatest() {
+    if (!isTauriRuntime()) return;
+    try {
+      await invokeCommand("installer_check_latest_versions", {
+        toolIds: [recipe.id],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(message, { tone: "error" });
     }
   }
 
@@ -412,13 +435,14 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
               {version}
             </Row>
           ) : null}
-          {supportsLatestVersion && (latestError || latest) ? (
+          {supportsLatestVersion ? (
             <Row label={t("installer.dialog.latestVersion")}>
-              <span
-                className={latestError ? "installer-tool-dialog__value-error" : undefined}
-              >
-                {latestError ?? latest}
-              </span>
+              <LatestVersionValue
+                error={latestError}
+                value={latest}
+                checking={checking}
+                onRefresh={() => void handleRefreshLatest()}
+              />
             </Row>
           ) : latestWebUrl ? (
             <Row label={t("installer.dialog.latestVersion")}>
@@ -474,7 +498,9 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
                   className="secondary-button installer-tool-dialog__quick-launch-terminal"
                   onClick={() => void handleOpenQuickLaunchTerminal()}
                 >
-                  {t("installer.quickLaunch.openTerminal")}
+                  {suiteTerminalIsElevated(recipe.id)
+                    ? t("installer.quickLaunch.openTerminal")
+                    : t("installer.launcher.openTerminal")}
                 </button>
               ) : null}
             </div>
@@ -721,7 +747,7 @@ function NotInstalledInfoBody({ recipe }: { recipe: Recipe }) {
     setOptions((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleCheckNow() {
+  async function handleRefreshLatest() {
     if (!isTauriRuntime()) return;
     try {
       await invokeCommand("installer_check_latest_versions", {
@@ -839,22 +865,12 @@ function NotInstalledInfoBody({ recipe }: { recipe: Recipe }) {
           ) : null}
           {supportsLatestVersion ? (
             <Row label={t("installer.dialog.latestVersion")}>
-              {latestError ? (
-                <span className="installer-tool-dialog__value-error">
-                  {latestError}
-                </span>
-              ) : toolState?.latestVersionSeen ?? (
-                <button
-                  type="button"
-                  className="installer-tool-dialog__inline-action"
-                  onClick={() => void handleCheckNow()}
-                  disabled={checking}
-                >
-                  {checking
-                    ? t("installer.dialog.checkingDots")
-                    : t("installer.dialog.checkNow")}
-                </button>
-              )}
+              <LatestVersionValue
+                error={latestError}
+                value={toolState?.latestVersionSeen ?? null}
+                checking={checking}
+                onRefresh={() => void handleRefreshLatest()}
+              />
             </Row>
           ) : latestWebUrl ? (
             <Row label={t("installer.dialog.latestVersion")}>
@@ -1123,6 +1139,136 @@ function StepperList({
 }
 
 // =================================================================
+// Launcher mode — mini launcher for installed command-line tools
+// =================================================================
+
+const RECENT_LAUNCH_FOLDERS_VISIBLE = 5;
+
+function LauncherBody({ recipe }: { recipe: Recipe }) {
+  const { t } = useTranslation();
+  const closeDialog = useInstallerStore((s) => s.closeDialog);
+  const showStatusBarNotice = useWorkspaceStore(
+    (state) => state.showStatusBarNotice,
+  );
+  const samples = cliLaunchSamplesForRecipe(recipe.id) ?? [];
+  const usesProjectFolders = cliLauncherUsesProjectFolders(recipe.id);
+  const [recentFolders, setRecentFolders] = useState<string[]>(() =>
+    usesProjectFolders ? readRecentLaunchFolders(recipe.id) : [],
+  );
+  const [showAllFolders, setShowAllFolders] = useState(false);
+  const visibleFolders = showAllFolders
+    ? recentFolders
+    : recentFolders.slice(0, RECENT_LAUNCH_FOLDERS_VISIBLE);
+
+  async function openTerminal(folder?: string) {
+    if (!isTauriRuntime()) return;
+    try {
+      await invokeCommand("installer_open_terminal_launcher", {
+        toolId: recipe.id,
+        ...(folder ? { path: folder } : {}),
+      });
+      if (folder) {
+        setRecentFolders(rememberLaunchFolder(recipe.id, folder));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showStatusBarNotice(message, { tone: "error" });
+    }
+  }
+
+  async function handleChooseFolder() {
+    const selected = await selectInstallerLaunchFolder({
+      title: t("installer.launcher.chooseFolder"),
+    });
+    if (selected) await openTerminal(selected);
+  }
+
+  return (
+    <>
+      <header className="installer-tool-dialog__header">
+        <ToolIcon recipe={recipe} />
+        <div>
+          <h2>{t("installer.launcher.title", { name: recipe.name })}</h2>
+        </div>
+      </header>
+      <div className="installer-tool-dialog__body">
+        <p className="installer-tool-dialog__desc">
+          {t("installer.launcher.body", { name: recipe.name })}
+        </p>
+        {usesProjectFolders && recentFolders.length > 0 ? (
+          <div className="installer-launcher__recent">
+            <span className="installer-launcher__recent-label">
+              {t("installer.launcher.recentFolders")}
+            </span>
+            <ul className="installer-launcher__recent-list">
+              {visibleFolders.map((folder) => (
+                <li key={folder}>
+                  <button
+                    type="button"
+                    className="installer-launcher__recent-item"
+                    title={folder}
+                    onClick={() => void openTerminal(folder)}
+                  >
+                    <code>{folder}</code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!showAllFolders &&
+            recentFolders.length > RECENT_LAUNCH_FOLDERS_VISIBLE ? (
+              <button
+                type="button"
+                className="installer-tool-dialog__inline-action"
+                onClick={() => setShowAllFolders(true)}
+              >
+                {t("installer.launcher.showMore")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <dl className="installer-tool-dialog__grid">
+          <Row label={t("installer.launcher.samples")}>
+            <span style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+              {samples.map((sample, i) => (
+                <code key={i}>{sample}</code>
+              ))}
+            </span>
+          </Row>
+        </dl>
+      </div>
+      <LegacyDialogActions
+        className="installer-tool-dialog__actions"
+        extraLeft={
+          usesProjectFolders ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void handleChooseFolder()}
+            >
+              {t("installer.launcher.chooseFolder")}
+            </button>
+          ) : null
+        }
+        primary={
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void openTerminal()}
+          >
+            {t("installer.launcher.openTerminal")}
+          </button>
+        }
+        cancel={
+          <button type="button" className="toolbar-button" onClick={closeDialog}>
+            {t("common.close")}
+          </button>
+        }
+      />
+    </>
+  );
+}
+
+// =================================================================
 // Small shared helpers
 // =================================================================
 
@@ -1155,6 +1301,37 @@ function Row({
       <dt>{label}</dt>
       <dd>{children}</dd>
     </>
+  );
+}
+
+function LatestVersionValue({
+  checking,
+  error,
+  onRefresh,
+  value,
+}: {
+  checking: boolean;
+  error: string | null | undefined;
+  onRefresh: () => void;
+  value: string | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <span className="installer-tool-dialog__latest-value">
+      {error ? (
+        <span className="installer-tool-dialog__value-error">{error}</span>
+      ) : (
+        value
+      )}
+      <button
+        type="button"
+        className="installer-tool-dialog__inline-action"
+        onClick={onRefresh}
+        disabled={checking}
+      >
+        {checking ? t("installer.dialog.checkingDots") : t("installer.refresh")}
+      </button>
+    </span>
   );
 }
 
@@ -1541,27 +1718,8 @@ function workspaceConnectionSpecForRecipe(
 function terminalLaunchAffordanceForRecipe(
   recipe: Recipe,
 ): { hints: string[] } | null {
-  switch (recipe.id) {
-    case "hermes-agent":
-      return {
-        hints: [
-          "hermes setup  —  configure providers and accounts",
-          "hermes postinstall  —  optional dependencies",
-          "hermes doctor  —  health check",
-          "hermes  —  start chatting",
-        ],
-      };
-    case "openclaw":
-      return {
-        hints: [
-          "openclaw onboard --install-daemon  —  setup and managed startup",
-          "openclaw doctor  —  check configuration",
-          "openclaw gateway status  —  verify gateway",
-        ],
-      };
-    default:
-      return null;
-  }
+  const hints = cliLaunchSamplesForRecipe(recipe.id);
+  return hints ? { hints } : null;
 }
 
 function serviceAffordanceForRecipe(recipe: Recipe): { name: string } | null {

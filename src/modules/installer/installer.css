@@ -469,6 +469,13 @@
   color: var(--text-muted);
 }
 
+.installer-tile__action-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .installer-tile__action {
   flex: 0 0 auto;
   min-width: 0;
@@ -502,6 +509,50 @@
 }
 
 /* ---------- InstallerToolDialog ---------- */
+
+.installer-launcher__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.installer-launcher__recent-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.installer-launcher__recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.installer-launcher__recent-item {
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.installer-launcher__recent-item:hover {
+  filter: brightness(1.04);
+}
+
+.installer-launcher__recent-item code {
+  font-size: 12px;
+}
 
 .installer-tool-dialog {
   position: relative;
@@ -596,6 +647,12 @@
 
 .installer-tool-dialog__value-error {
   color: var(--red);
+}
+
+.installer-tool-dialog__latest-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
 }
 
 .installer-tool-dialog__inline-action {

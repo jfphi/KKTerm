@@ -961,6 +961,15 @@
       "launch": "Iniciar",
       "noMatches": "Nenhuma ferramenta corresponde à sua pesquisa."
     },
+    "launcher": {
+      "title": "Executar {{name}}",
+      "body": "{{name}} é uma ferramenta de linha de comando executada em uma janela de terminal.",
+      "samples": "Comandos de exemplo",
+      "openTerminal": "Abrir terminal",
+      "recentFolders": "Pastas recentes",
+      "chooseFolder": "Escolher pasta…",
+      "showMore": "Mostrar mais"
+    },
     "stepper": {
       "failedBadge": "Falhou"
     },

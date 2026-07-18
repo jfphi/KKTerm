@@ -961,6 +961,15 @@
       "launch": "Jalankan",
       "noMatches": "Tidak ada alat yang cocok dengan pencarian Anda."
     },
+    "launcher": {
+      "title": "Jalankan {{name}}",
+      "body": "{{name}} adalah alat baris perintah yang dijalankan di jendela terminal.",
+      "samples": "Contoh perintah",
+      "openTerminal": "Buka terminal",
+      "recentFolders": "Folder terbaru",
+      "chooseFolder": "Pilih folder…",
+      "showMore": "Tampilkan lebih banyak"
+    },
     "stepper": {
       "failedBadge": "Gagal"
     },

@@ -3307,6 +3307,12 @@ type CommandMap = {
     result: void;
   };
   installer_open_terminal_launcher: {
+    // `path` opens the terminal in a remembered/chosen project folder for
+    // directory-scoped coding agents; omitted for the plain launcher.
+    args: { toolId: string; path?: string };
+    result: void;
+  };
+  installer_launch_app: {
     args: { toolId: string };
     result: void;
   };
@@ -3697,6 +3703,22 @@ export async function selectAppLauncherFile(options: {
     directory: false,
     defaultPath,
     filters,
+    multiple: false,
+    title: options.title,
+  });
+
+  return typeof selectedPath === "string" ? selectedPath : null;
+}
+
+export async function selectInstallerLaunchFolder(options: {
+  title: string;
+}) {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+
+  const selectedPath = await openDialog({
+    directory: true,
     multiple: false,
     title: options.title,
   });
