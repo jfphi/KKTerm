@@ -4,7 +4,7 @@
 - **Namespace**: `installer`
 - **File/component**: `src/modules/installer/InstallerToolDialog.tsx`
 - **UI role**: `label`
-- **User flow**: Row label in the mini launcher dialog next to the list of example command lines for an installed command-line tool.
+- **User flow**: Row label in the mini launcher dialog next to the list of example command lines for an installed non-agent command-line tool. Coding agents use option controls instead of samples.
 - **Tone**: concise/neutral
 - **Placeholders**: none
 - **Context/meaning**: "Sample" = illustrative example usage, not a data sample or audio sample.
