@@ -120,6 +120,14 @@ const CLI_LAUNCH_SAMPLES: Record<string, string[]> = {
     "codex  —  start Codex in this directory",
     "codex --help  —  list commands and flags",
   ],
+  "kimi-code-cli": [
+    "kimi  —  start Kimi Code in this directory",
+    "kimi --help  —  list commands and flags",
+  ],
+  "grok-build": [
+    "grok  —  start Grok Build in this directory",
+    "grok --help  —  list commands and flags",
+  ],
   opencode: [
     "opencode  —  start OpenCode in this directory",
     "opencode --help  —  list commands and flags",

@@ -997,6 +997,20 @@ fn terminal_launch_affordance(tool_id: &str) -> Option<TerminalLaunchAffordance>
                 "codex --help  —  list commands and flags",
             ],
         ),
+        "kimi-code-cli" => plain(
+            "kimi",
+            &[
+                "kimi  —  start Kimi Code in this directory",
+                "kimi --help  —  list commands and flags",
+            ],
+        ),
+        "grok-build" => plain(
+            "grok",
+            &[
+                "grok  —  start Grok Build in this directory",
+                "grok --help  —  list commands and flags",
+            ],
+        ),
         "opencode" => plain(
             "opencode",
             &[
