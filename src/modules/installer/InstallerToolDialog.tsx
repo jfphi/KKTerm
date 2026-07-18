@@ -121,6 +121,7 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
   const catalog = useInstallerStore((s) => s.catalog);
   const closeDialog = useInstallerStore((s) => s.closeDialog);
   const openStepperDialog = useInstallerStore((s) => s.openStepperDialog);
+  const openLauncherDialog = useInstallerStore((s) => s.openLauncherDialog);
   const beginInFlight = useInstallerStore((s) => s.beginInFlight);
   const openWslManager = useInstallerStore((s) => s.openWslManager);
   const showStatusBarNotice = useWorkspaceStore(
@@ -333,14 +334,8 @@ function InstalledInfoBody({ recipe }: { recipe: Recipe }) {
     }
   }
 
-  async function handleOpenTerminalLauncher() {
-    if (!isTauriRuntime()) return;
-    try {
-      await invokeCommand("installer_open_terminal_launcher", { toolId: recipe.id });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showStatusBarNotice(message, { tone: "error" });
-    }
+  function handleOpenTerminalLauncher() {
+    openLauncherDialog(recipe.id);
   }
 
   async function handleQuickLaunch(command: string) {

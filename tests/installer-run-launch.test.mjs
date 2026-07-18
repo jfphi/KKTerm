@@ -36,6 +36,25 @@ test("installed tiles expose a Run button routed by launch kind", async () => {
   );
 });
 
+test("installed details route CLI Run through the launcher dialog", async () => {
+  const dialog = await read("../src/modules/installer/InstallerToolDialog.tsx");
+  const installedInfo = dialog.match(
+    /function InstalledInfoBody[\s\S]*?function NotInstalledInfoBody/,
+  )?.[0];
+
+  assert.ok(installedInfo, "the installed-details component should exist");
+  assert.match(
+    installedInfo,
+    /const openLauncherDialog = useInstallerStore\([\s\S]*?openLauncherDialog/,
+    "installed details should subscribe to the shared launcher-dialog action",
+  );
+  assert.match(
+    installedInfo,
+    /function handleOpenTerminalLauncher\(\) \{\s*openLauncherDialog\(recipe\.id\);\s*\}/,
+    "the details Run button should open the same setup dialog as tile Run",
+  );
+});
+
 test("coding-agent launcher shows persisted options instead of samples", async () => {
   const dialog = await read("../src/modules/installer/InstallerToolDialog.tsx");
   const launch = await read("../src/modules/installer/launch.ts");
