@@ -13,7 +13,75 @@
 // Rust `terminal_launch_affordance` entries in
 // src-tauri/src/installer/commands.rs — keep both sides in sync.
 
+import { readDurableUiState, writeDurableUiState } from "../../lib/durableUiState";
+
 export type LaunchKind = "gui" | "cli" | "webUi" | "suite";
+
+/// Directory-scoped coding agents: their mini launcher remembers the project
+/// folders they were opened in and can open a terminal at a chosen folder.
+const CODING_AGENT_CLI_RECIPES = new Set<string>([
+  "claude-code-cli",
+  "codex-cli",
+  "kimi-code-cli",
+  "grok-build",
+  "opencode",
+]);
+
+/// Durable store for remembered launch folders: one JSON object mapping
+/// tool id → most-recent-first folder list. Registered in
+/// `DURABLE_UI_STATE_PREFIXES` so it survives reinstalls and is wiped by
+/// Settings → Reset All Settings.
+const RECENT_LAUNCH_FOLDERS_KEY = "kkterm.installerLauncherRecentPaths.v1";
+const MAX_RECENT_LAUNCH_FOLDERS = 20;
+
+export function cliLauncherUsesProjectFolders(recipeId: string): boolean {
+  return CODING_AGENT_CLI_RECIPES.has(recipeId);
+}
+
+function readAllRecentLaunchFolders(): Record<string, string[]> {
+  try {
+    const raw = readDurableUiState(RECENT_LAUNCH_FOLDERS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, string[]> = {};
+    for (const [toolId, folders] of Object.entries(parsed)) {
+      if (Array.isArray(folders)) {
+        result[toolId] = folders.filter(
+          (folder): folder is string => typeof folder === "string",
+        );
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export function readRecentLaunchFolders(recipeId: string): string[] {
+  return readAllRecentLaunchFolders()[recipeId] ?? [];
+}
+
+/// Record a folder the tool was just opened in. Moves it to the front,
+/// deduplicates case-insensitively (Windows paths), caps the list, and
+/// returns the updated list for immediate rendering.
+export function rememberLaunchFolder(recipeId: string, folder: string): string[] {
+  const trimmed = folder.trim();
+  if (!trimmed) return readRecentLaunchFolders(recipeId);
+  const all = readAllRecentLaunchFolders();
+  const previous = all[recipeId] ?? [];
+  const next = [
+    trimmed,
+    ...previous.filter(
+      (candidate) => candidate.toLowerCase() !== trimmed.toLowerCase(),
+    ),
+  ].slice(0, MAX_RECENT_LAUNCH_FOLDERS);
+  all[recipeId] = next;
+  writeDurableUiState(RECENT_LAUNCH_FOLDERS_KEY, JSON.stringify(all));
+  return next;
+}
 
 /// Installed GUI apps the backend can start directly. Mirrors the Rust
 /// `gui_launch_affordance` allow-list.

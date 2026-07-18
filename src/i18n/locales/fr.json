@@ -965,7 +965,10 @@
       "title": "Exécuter {{name}}",
       "body": "{{name}} est un outil en ligne de commande qui s'exécute dans une fenêtre de terminal.",
       "samples": "Exemples de commandes",
-      "openTerminal": "Ouvrir le terminal"
+      "openTerminal": "Ouvrir le terminal",
+      "recentFolders": "Dossiers récents",
+      "chooseFolder": "Choisir un dossier…",
+      "showMore": "Afficher plus"
     },
     "stepper": {
       "failedBadge": "Échec"

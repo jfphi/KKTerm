@@ -965,7 +965,10 @@
       "title": "執行 {{name}}",
       "body": "{{name}} 是命令列工具，需在終端機視窗中執行。",
       "samples": "指令範例",
-      "openTerminal": "開啟終端機"
+      "openTerminal": "開啟終端機",
+      "recentFolders": "最近的資料夾",
+      "chooseFolder": "選擇資料夾…",
+      "showMore": "顯示更多"
     },
     "stepper": {
       "failedBadge": "失敗"

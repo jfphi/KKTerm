@@ -965,7 +965,10 @@
       "title": "{{name}} 실행",
       "body": "{{name}}은(는) 터미널 창에서 실행하는 명령줄 도구입니다.",
       "samples": "명령 예시",
-      "openTerminal": "터미널 열기"
+      "openTerminal": "터미널 열기",
+      "recentFolders": "최근 폴더",
+      "chooseFolder": "폴더 선택…",
+      "showMore": "더 보기"
     },
     "stepper": {
       "failedBadge": "실패"

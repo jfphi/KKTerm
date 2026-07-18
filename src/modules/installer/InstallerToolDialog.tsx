@@ -16,6 +16,7 @@ import {
   invokeCommand,
   isTauriRuntime,
   openExternalUrl,
+  selectInstallerLaunchFolder,
 } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
 import {
@@ -26,7 +27,13 @@ import {
   resolveInstallPlan,
 } from "./dag";
 import { iconUrlForRecipe, FALLBACK_ICON_URL } from "./icons";
-import { cliLaunchSamplesForRecipe, suiteTerminalIsElevated } from "./launch";
+import {
+  cliLaunchSamplesForRecipe,
+  cliLauncherUsesProjectFolders,
+  readRecentLaunchFolders,
+  rememberLaunchFolder,
+  suiteTerminalIsElevated,
+} from "./launch";
 import { InstallerConfirmDialog } from "./InstallerConfirmDialog";
 import { installRecipeAndWait } from "./progress";
 import { ToggleSwitch } from "../settings/ToggleSwitch";
@@ -1131,6 +1138,8 @@ function StepperList({
 // Launcher mode — mini launcher for installed command-line tools
 // =================================================================
 
+const RECENT_LAUNCH_FOLDERS_VISIBLE = 5;
+
 function LauncherBody({ recipe }: { recipe: Recipe }) {
   const { t } = useTranslation();
   const closeDialog = useInstallerStore((s) => s.closeDialog);
@@ -1138,17 +1147,36 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
     (state) => state.showStatusBarNotice,
   );
   const samples = cliLaunchSamplesForRecipe(recipe.id) ?? [];
+  const usesProjectFolders = cliLauncherUsesProjectFolders(recipe.id);
+  const [recentFolders, setRecentFolders] = useState<string[]>(() =>
+    usesProjectFolders ? readRecentLaunchFolders(recipe.id) : [],
+  );
+  const [showAllFolders, setShowAllFolders] = useState(false);
+  const visibleFolders = showAllFolders
+    ? recentFolders
+    : recentFolders.slice(0, RECENT_LAUNCH_FOLDERS_VISIBLE);
 
-  async function handleOpenTerminal() {
+  async function openTerminal(folder?: string) {
     if (!isTauriRuntime()) return;
     try {
       await invokeCommand("installer_open_terminal_launcher", {
         toolId: recipe.id,
+        ...(folder ? { path: folder } : {}),
       });
+      if (folder) {
+        setRecentFolders(rememberLaunchFolder(recipe.id, folder));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       showStatusBarNotice(message, { tone: "error" });
     }
+  }
+
+  async function handleChooseFolder() {
+    const selected = await selectInstallerLaunchFolder({
+      title: t("installer.launcher.chooseFolder"),
+    });
+    if (selected) await openTerminal(selected);
   }
 
   return (
@@ -1163,6 +1191,37 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
         <p className="installer-tool-dialog__desc">
           {t("installer.launcher.body", { name: recipe.name })}
         </p>
+        {usesProjectFolders && recentFolders.length > 0 ? (
+          <div className="installer-launcher__recent">
+            <span className="installer-launcher__recent-label">
+              {t("installer.launcher.recentFolders")}
+            </span>
+            <ul className="installer-launcher__recent-list">
+              {visibleFolders.map((folder) => (
+                <li key={folder}>
+                  <button
+                    type="button"
+                    className="installer-launcher__recent-item"
+                    title={folder}
+                    onClick={() => void openTerminal(folder)}
+                  >
+                    <code>{folder}</code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!showAllFolders &&
+            recentFolders.length > RECENT_LAUNCH_FOLDERS_VISIBLE ? (
+              <button
+                type="button"
+                className="installer-tool-dialog__inline-action"
+                onClick={() => setShowAllFolders(true)}
+              >
+                {t("installer.launcher.showMore")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <dl className="installer-tool-dialog__grid">
           <Row label={t("installer.launcher.samples")}>
             <span style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
@@ -1175,11 +1234,22 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
       </div>
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
+        extraLeft={
+          usesProjectFolders ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void handleChooseFolder()}
+            >
+              {t("installer.launcher.chooseFolder")}
+            </button>
+          ) : null
+        }
         primary={
           <button
             type="button"
             className="secondary-button"
-            onClick={() => void handleOpenTerminal()}
+            onClick={() => void openTerminal()}
           >
             {t("installer.launcher.openTerminal")}
           </button>

@@ -1118,15 +1118,39 @@ fn terminal_launch_affordance(tool_id: &str) -> Option<TerminalLaunchAffordance>
     }
 }
 
+/// `path`, when present, is the working directory to open the terminal in —
+/// used by directory-scoped coding agents whose launcher remembers recent
+/// project folders. It must name an existing absolute directory.
 #[tauri::command]
-pub async fn installer_open_terminal_launcher(tool_id: String) -> Result<(), String> {
+pub async fn installer_open_terminal_launcher(
+    tool_id: String,
+    path: Option<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let affordance = terminal_launch_affordance(&tool_id)
             .ok_or_else(|| format!("tool `{tool_id}` does not have a terminal launcher"))?;
-        spawn_terminal_launcher(&affordance)
+        let working_dir = path.as_deref().map(validated_launch_dir).transpose()?;
+        spawn_terminal_launcher(&affordance, working_dir.as_deref())
     })
     .await
     .map_err(|error| format!("failed to open terminal launcher: {error}"))?
+}
+
+/// Validate a launcher working directory: absolute and existing, so a stale
+/// remembered folder fails with a clear message instead of a broken prompt.
+fn validated_launch_dir(path: &str) -> Result<std::path::PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("launch folder is empty".into());
+    }
+    let dir = std::path::PathBuf::from(trimmed);
+    if !dir.is_absolute() {
+        return Err(format!("launch folder `{trimmed}` is not an absolute path"));
+    }
+    if !dir.is_dir() {
+        return Err(format!("launch folder `{trimmed}` no longer exists"));
+    }
+    Ok(dir)
 }
 
 /// One way to locate an installed GUI app's executable. Candidates are tried
@@ -1731,14 +1755,17 @@ pub async fn installer_launch_quick_command(
 pub async fn installer_open_quick_launch_terminal(tool_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || match tool_id.as_str() {
         "sysinternals-suite" => spawn_elevated_powershell(),
-        "coreutils" => spawn_terminal_launcher(&TerminalLaunchAffordance {
-            activate_ps1: None,
-            setup_lines: vec![],
-            prefill: "ls".into(),
-            hints: vec![
-                "Coreutils commands are on PATH — e.g. ls, cat, head, tail, sort, wc.".into(),
-            ],
-        }),
+        "coreutils" => spawn_terminal_launcher(
+            &TerminalLaunchAffordance {
+                activate_ps1: None,
+                setup_lines: vec![],
+                prefill: "ls".into(),
+                hints: vec![
+                    "Coreutils commands are on PATH — e.g. ls, cat, head, tail, sort, wc.".into(),
+                ],
+            },
+            None,
+        ),
         _ => Err(format!("tool `{tool_id}` does not have a quick launcher")),
     })
     .await
@@ -2335,7 +2362,10 @@ fn ps_single_quote(value: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_terminal_launcher(affordance: &TerminalLaunchAffordance) -> Result<(), String> {
+fn spawn_terminal_launcher(
+    affordance: &TerminalLaunchAffordance,
+    working_dir: Option<&std::path::Path>,
+) -> Result<(), String> {
     let ps_command = build_terminal_launcher_ps_command(affordance);
     let mut command = Command::new("powershell");
     command.args([
@@ -2349,6 +2379,9 @@ fn spawn_terminal_launcher(affordance: &TerminalLaunchAffordance) -> Result<(), 
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
     command.creation_flags(CREATE_NEW_CONSOLE);
+    if let Some(dir) = working_dir {
+        command.current_dir(dir);
+    }
     if let Some(path) = super::install::refreshed_path_public() {
         command.env("PATH", path);
     }
@@ -2359,7 +2392,10 @@ fn spawn_terminal_launcher(affordance: &TerminalLaunchAffordance) -> Result<(), 
 }
 
 #[cfg(not(target_os = "windows"))]
-fn spawn_terminal_launcher(_affordance: &TerminalLaunchAffordance) -> Result<(), String> {
+fn spawn_terminal_launcher(
+    _affordance: &TerminalLaunchAffordance,
+    _working_dir: Option<&std::path::Path>,
+) -> Result<(), String> {
     Err("terminal launcher is only available on Windows".into())
 }
 
@@ -2895,6 +2931,22 @@ mod tests {
             terminal_launch_affordance("vscode").is_none(),
             "GUI apps launch directly instead of through the terminal launcher"
         );
+    }
+
+    #[test]
+    fn launch_dir_validation_requires_an_existing_absolute_directory() {
+        assert!(validated_launch_dir("").is_err());
+        assert!(validated_launch_dir("   ").is_err());
+        assert!(validated_launch_dir("relative\\project").is_err());
+
+        let temp = std::env::temp_dir();
+        assert_eq!(
+            validated_launch_dir(temp.to_string_lossy().as_ref()).as_deref(),
+            Ok(temp.as_path())
+        );
+
+        let missing = temp.join("kkterm-launch-dir-that-does-not-exist");
+        assert!(validated_launch_dir(missing.to_string_lossy().as_ref()).is_err());
     }
 
     #[test]

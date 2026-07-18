@@ -111,6 +111,52 @@ test("frontend launch classification stays in sync with the Rust allow-lists", a
   assert.match(commands, /"coreutils" => vec!\[/);
 });
 
+test("coding-agent launchers remember project folders", async () => {
+  const launch = await read("../src/modules/installer/launch.ts");
+  const dialog = await read("../src/modules/installer/InstallerToolDialog.tsx");
+  const commands = await read("../src-tauri/src/installer/commands.rs");
+  const durable = await read("../src/lib/durableUiState.ts");
+
+  // Every coding agent in the folder-remembering set is also a CLI launcher.
+  const agentBlock = launch.match(
+    /CODING_AGENT_CLI_RECIPES = new Set<string>\(\[([\s\S]*?)\]\)/,
+  )?.[1];
+  assert.ok(agentBlock, "launch.ts should declare the coding-agent set");
+  const agentIds = [...agentBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  for (const id of ["claude-code-cli", "codex-cli", "kimi-code-cli", "grok-build", "opencode"]) {
+    assert.ok(agentIds.includes(id), `${id} should remember launch folders`);
+  }
+  for (const id of agentIds) {
+    const sampleKey = /^[A-Za-z_$][\w$]*$/.test(id)
+      ? `(?:${id}|["']${id}["'])`
+      : `["']${id}["']`;
+    assert.match(
+      launch,
+      new RegExp(`${sampleKey}: \\[`),
+      `${id} should also have CLI launcher samples`,
+    );
+  }
+
+  // Recents persist in the durable UI-state tier (survives reinstall, wiped
+  // by Reset All Settings).
+  assert.match(launch, /kkterm\.installerLauncherRecentPaths\.v1/);
+  assert.match(durable, /"kkterm\.installerLauncherRecentPaths\.v1"/);
+  assert.match(launch, /MAX_RECENT_LAUNCH_FOLDERS = 20/);
+
+  // Dialog shows five, expands on demand, and offers the folder picker.
+  assert.match(dialog, /RECENT_LAUNCH_FOLDERS_VISIBLE = 5/);
+  assert.match(dialog, /installer\.launcher\.recentFolders/);
+  assert.match(dialog, /installer\.launcher\.showMore/);
+  assert.match(dialog, /installer\.launcher\.chooseFolder/);
+  assert.match(dialog, /selectInstallerLaunchFolder/);
+  assert.match(dialog, /rememberLaunchFolder\(recipe\.id/);
+
+  // Backend validates the requested folder before spawning there.
+  assert.match(commands, /path: Option<String>/);
+  assert.match(commands, /fn validated_launch_dir/);
+  assert.match(commands, /command\.current_dir\(dir\)/);
+});
+
 test("GUI launch runs through a closed backend allow-list", async () => {
   const commands = await read("../src-tauri/src/installer/commands.rs");
 

@@ -965,7 +965,10 @@
       "title": "{{name}} を実行",
       "body": "{{name}} はターミナル ウィンドウで実行するコマンドライン ツールです。",
       "samples": "コマンド例",
-      "openTerminal": "ターミナルを開く"
+      "openTerminal": "ターミナルを開く",
+      "recentFolders": "最近のフォルダー",
+      "chooseFolder": "フォルダーを選択…",
+      "showMore": "もっと見る"
     },
     "stepper": {
       "failedBadge": "失敗"

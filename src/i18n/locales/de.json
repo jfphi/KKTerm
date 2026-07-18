@@ -965,7 +965,10 @@
       "title": "{{name}} ausführen",
       "body": "{{name}} ist ein Befehlszeilentool, das in einem Terminalfenster läuft.",
       "samples": "Beispielbefehle",
-      "openTerminal": "Terminal öffnen"
+      "openTerminal": "Terminal öffnen",
+      "recentFolders": "Zuletzt verwendete Ordner",
+      "chooseFolder": "Ordner auswählen…",
+      "showMore": "Mehr anzeigen"
     },
     "stepper": {
       "failedBadge": "Fehlgeschlagen"
