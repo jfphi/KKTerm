@@ -1199,6 +1199,7 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
         toolId: recipe.id,
         ...(folder ? { path: folder } : {}),
         ...(launchArguments ? { arguments: launchArguments } : {}),
+        execute: usesProjectFolders,
       });
       if (folder) {
         setRecentFolders(rememberLaunchFolder(recipe.id, folder));
@@ -1228,37 +1229,6 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
         <p className="installer-tool-dialog__desc">
           {t("installer.launcher.body", { name: recipe.name })}
         </p>
-        {usesProjectFolders && recentFolders.length > 0 ? (
-          <div className="installer-launcher__recent">
-            <span className="installer-launcher__recent-label">
-              {t("installer.launcher.recentFolders")}
-            </span>
-            <ul className="installer-launcher__recent-list">
-              {visibleFolders.map((folder) => (
-                <li key={folder}>
-                  <button
-                    type="button"
-                    className="installer-launcher__recent-item"
-                    title={folder}
-                    onClick={() => void openTerminal(folder)}
-                  >
-                    <code>{folder}</code>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {!showAllFolders &&
-            recentFolders.length > RECENT_LAUNCH_FOLDERS_VISIBLE ? (
-              <button
-                type="button"
-                className="installer-tool-dialog__inline-action"
-                onClick={() => setShowAllFolders(true)}
-              >
-                {t("installer.launcher.showMore")}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
         {codingAgentOptions ? (
           <div className="installer-launcher__options">
             <label className="installer-launcher__field">
@@ -1305,6 +1275,37 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
             </Row>
           </dl>
         )}
+        {usesProjectFolders && recentFolders.length > 0 ? (
+          <div className="installer-launcher__recent">
+            <span className="installer-launcher__recent-label">
+              {t("installer.launcher.recentFolders")}
+            </span>
+            <ul className="installer-launcher__recent-list">
+              {visibleFolders.map((folder) => (
+                <li key={folder}>
+                  <button
+                    type="button"
+                    className="installer-launcher__recent-item"
+                    title={folder}
+                    onClick={() => void openTerminal(folder)}
+                  >
+                    <code>{folder}</code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!showAllFolders &&
+            recentFolders.length > RECENT_LAUNCH_FOLDERS_VISIBLE ? (
+              <button
+                type="button"
+                className="installer-tool-dialog__inline-action"
+                onClick={() => setShowAllFolders(true)}
+              >
+                {t("installer.launcher.showMore")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <LegacyDialogActions
         className="installer-tool-dialog__actions"
@@ -1325,7 +1326,9 @@ function LauncherBody({ recipe }: { recipe: Recipe }) {
             className="secondary-button"
             onClick={() => void openTerminal()}
           >
-            {t("installer.launcher.openTerminal")}
+            {usesProjectFolders
+              ? t("installer.actions.run")
+              : t("installer.launcher.openTerminal")}
           </button>
         }
         cancel={

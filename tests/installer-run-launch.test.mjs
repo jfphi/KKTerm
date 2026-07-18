@@ -55,16 +55,18 @@ test("coding-agent launcher shows persisted options instead of samples", async (
   assert.match(dialog, /arguments: launchArguments/);
   assert.match(
     dialog,
+    /execute: usesProjectFolders/,
+    "directory-scoped coding agents should request immediate execution",
+  );
+  assert.match(
+    dialog,
     /codingAgentOptions \? \([\s\S]*installer\.launcher\.commonOption[\s\S]*\) : \([\s\S]*installer\.launcher\.samples/,
     "samples should only render on the non-coding-agent branch",
   );
   assert.match(launch, /kkterm\.installerLauncherOptions\.v1/);
   assert.match(durable, /"kkterm\.installerLauncherOptions\.v1"/);
-  assert.match(
-    dialog,
-    /installer\.launcher\.openTerminal/,
-    "launcher dialog should offer the open-terminal action",
-  );
+  assert.match(dialog, /usesProjectFolders[\s\S]*installer\.actions\.run/);
+  assert.match(dialog, /installer\.launcher\.openTerminal/);
   assert.match(
     dialog,
     /installer_open_terminal_launcher/,
@@ -184,10 +186,17 @@ test("coding-agent launchers remember project folders", async () => {
   assert.match(dialog, /installer\.launcher\.chooseFolder/);
   assert.match(dialog, /selectInstallerLaunchFolder/);
   assert.match(dialog, /rememberLaunchFolder\(recipe\.id/);
+  assert.ok(
+    dialog.indexOf("{codingAgentOptions ? (") <
+      dialog.indexOf("{usesProjectFolders && recentFolders.length > 0 ? ("),
+    "command-line options should render above recent folders",
+  );
 
   // Backend validates the requested folder before spawning there.
   assert.match(commands, /path: Option<String>/);
   assert.match(commands, /arguments: Option<String>/);
+  assert.match(commands, /execute: Option<bool>/);
+  assert.match(commands, /fn coding_agent_terminal_launcher/);
   assert.match(commands, /fn validated_launch_dir/);
   assert.match(commands, /let working_directory = working_dir\.map/);
 });

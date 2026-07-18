@@ -1098,19 +1098,39 @@ pub async fn installer_open_terminal_launcher(
     tool_id: String,
     path: Option<String>,
     arguments: Option<String>,
+    execute: Option<bool>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut affordance = terminal_launch_affordance(&tool_id)
             .ok_or_else(|| format!("tool `{tool_id}` does not have a terminal launcher"))?;
+        let execute = execute.unwrap_or(false);
+        if execute && !coding_agent_terminal_launcher(&tool_id) {
+            return Err(format!(
+                "tool `{tool_id}` does not support direct terminal execution"
+            ));
+        }
         if let Some(arguments) = validated_launcher_arguments(arguments.as_deref())? {
             affordance.prefill.push(' ');
             affordance.prefill.push_str(&arguments);
         }
         let working_dir = path.as_deref().map(validated_launch_dir).transpose()?;
-        spawn_terminal_launcher(&affordance, working_dir.as_deref())
+        spawn_terminal_launcher(&affordance, working_dir.as_deref(), execute)
     })
     .await
     .map_err(|error| format!("failed to open terminal launcher: {error}"))?
+}
+
+fn coding_agent_terminal_launcher(tool_id: &str) -> bool {
+    matches!(
+        tool_id,
+        "antigravity-cli"
+            | "claude-code-cli"
+            | "codex-cli"
+            | "cursor-cli"
+            | "kimi-code-cli"
+            | "grok-build"
+            | "opencode"
+    )
 }
 
 fn validated_launcher_arguments(arguments: Option<&str>) -> Result<Option<String>, String> {
@@ -1885,6 +1905,7 @@ pub async fn installer_open_quick_launch_terminal(tool_id: String) -> Result<(),
                 ],
             },
             None,
+            false,
         ),
         _ => Err(format!("tool `{tool_id}` does not have a quick launcher")),
     })
@@ -2485,6 +2506,7 @@ fn ps_single_quote(value: &str) -> String {
 fn spawn_terminal_launcher(
     affordance: &TerminalLaunchAffordance,
     working_dir: Option<&std::path::Path>,
+    execute: bool,
 ) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::{null, null_mut};
@@ -2497,6 +2519,7 @@ fn spawn_terminal_launcher(
     let parameters = build_terminal_launcher_shell_parameters(
         affordance,
         super::install::refreshed_path_public().as_deref(),
+        execute,
     );
     let file = "powershell.exe"
         .encode_utf16()
@@ -2538,6 +2561,7 @@ fn spawn_terminal_launcher(
 fn spawn_terminal_launcher(
     _affordance: &TerminalLaunchAffordance,
     _working_dir: Option<&std::path::Path>,
+    _execute: bool,
 ) -> Result<(), String> {
     Err("terminal launcher is only available on Windows".into())
 }
@@ -2633,11 +2657,16 @@ fn spawn_elevated_powershell() -> Result<(), String> {
     Err("elevated PowerShell is only available on Windows".into())
 }
 
-fn build_terminal_launcher_ps_command(affordance: &TerminalLaunchAffordance) -> String {
+fn build_terminal_launcher_ps_command(
+    affordance: &TerminalLaunchAffordance,
+    execute: bool,
+) -> String {
     let mut parts: Vec<String> = vec![
         "$host.UI.RawUI.WindowTitle = 'KKTerm terminal'".into(),
-        "Import-Module PSReadLine -ErrorAction SilentlyContinue".into(),
     ];
+    if !execute {
+        parts.push("Import-Module PSReadLine -ErrorAction SilentlyContinue".into());
+    }
     if let Some(activate) = &affordance.activate_ps1 {
         let escaped = activate.replace('\'', "''");
         parts.push(format!("& '{escaped}'"));
@@ -2649,20 +2678,50 @@ fn build_terminal_launcher_ps_command(affordance: &TerminalLaunchAffordance) -> 
         parts.push(format!("Write-Host '  {escaped}' -ForegroundColor Cyan"));
     }
     parts.push("Write-Host ''".into());
-    let prefill_escaped = affordance.prefill.replace('\'', "''");
-    parts.push(format!(
-        "function global:prompt {{ if (-not $global:__kkt_pf) {{ $global:__kkt_pf = $true; if (Get-Module PSReadLine) {{ [Microsoft.PowerShell.PSConsoleReadLine]::Insert('{prefill_escaped}') }} }}; 'PS ' + (Get-Location) + '> ' }}"
-    ));
+    if execute {
+        let (program, arguments) = affordance
+            .prefill
+            .split_once(' ')
+            .map_or((affordance.prefill.as_str(), None), |(program, arguments)| {
+                (program, Some(arguments))
+            });
+        parts.push("$ErrorActionPreference = 'Stop'".into());
+        let executable_names = [".exe", ".com", ".cmd", ".bat"]
+            .map(|extension| ps_single_quote(&format!("{program}{extension}")))
+            .join(", ");
+        parts.push(format!(
+            "$__kkt_launcher = @({executable_names}) | ForEach-Object {{ Get-Command $_ -ErrorAction SilentlyContinue }} | Select-Object -First 1"
+        ));
+        parts.push(format!(
+            "if (-not $__kkt_launcher) {{ throw {} }}",
+            ps_single_quote(&format!("{program} was not found on PATH"))
+        ));
+        let mut launch = "Start-Process -FilePath $__kkt_launcher.Source".to_string();
+        if let Some(arguments) = arguments {
+            launch.push_str(&format!(
+                " -ArgumentList {}",
+                ps_single_quote(arguments)
+            ));
+        }
+        launch.push_str(" -NoNewWindow -Wait");
+        parts.push(launch);
+    } else {
+        let prefill_escaped = affordance.prefill.replace('\'', "''");
+        parts.push(format!(
+            "function global:prompt {{ if (-not $global:__kkt_pf) {{ $global:__kkt_pf = $true; if (Get-Module PSReadLine) {{ [Microsoft.PowerShell.PSConsoleReadLine]::Insert('{prefill_escaped}') }} }}; 'PS ' + (Get-Location) + '> ' }}"
+        ));
+    }
     parts.join("; ")
 }
 
 fn build_terminal_launcher_shell_parameters(
     affordance: &TerminalLaunchAffordance,
     refreshed_path: Option<&str>,
+    execute: bool,
 ) -> String {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    let mut ps_command = build_terminal_launcher_ps_command(affordance);
+    let mut ps_command = build_terminal_launcher_ps_command(affordance, execute);
     if let Some(path) = refreshed_path {
         ps_command = format!("$env:PATH = {}; {ps_command}", ps_single_quote(path));
     }
@@ -3024,14 +3083,18 @@ mod tests {
             hints: vec![],
         };
 
-        let command = build_terminal_launcher_ps_command(&affordance);
+        let command = build_terminal_launcher_ps_command(&affordance, false);
 
         assert!(command.contains("Import-Module PSReadLine"));
         assert!(command.contains("[Microsoft.PowerShell.PSConsoleReadLine]::Insert"));
         assert!(!command.contains("PSReadLine.PSConsoleReadLine"));
 
         let parameters =
-            build_terminal_launcher_shell_parameters(&affordance, Some(r"C:\Tools;C:\Windows"));
+            build_terminal_launcher_shell_parameters(
+                &affordance,
+                Some(r"C:\Tools;C:\Windows"),
+                false,
+            );
         let encoded = parameters
             .split_whitespace()
             .last()
@@ -3047,6 +3110,24 @@ mod tests {
         assert!(parameters.contains("-EncodedCommand"));
         assert!(decoded.starts_with("$env:PATH = 'C:\\Tools;C:\\Windows'; "));
         assert!(decoded.contains("hermes setup"));
+    }
+
+    #[test]
+    fn terminal_launcher_execute_starts_command_in_current_console() {
+        let affordance = TerminalLaunchAffordance {
+            activate_ps1: None,
+            setup_lines: vec![],
+            prefill: "claude --model 'opus'".into(),
+            hints: vec![],
+        };
+
+        let command = build_terminal_launcher_ps_command(&affordance, true);
+
+        assert!(command.contains("'claude.exe', 'claude.com', 'claude.cmd', 'claude.bat'"));
+        assert!(command.contains("Start-Process -FilePath $__kkt_launcher.Source"));
+        assert!(command.contains("-ArgumentList '--model ''opus'''"));
+        assert!(command.contains("-NoNewWindow -Wait"));
+        assert!(!command.contains("PSConsoleReadLine]::Insert"));
     }
 
     #[test]

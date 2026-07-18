@@ -3308,9 +3308,14 @@ type CommandMap = {
   };
   installer_open_terminal_launcher: {
     // `path` opens the terminal in a remembered/chosen project folder for
-    // directory-scoped coding agents. `arguments` is inserted into the new
-    // terminal's editable command line; neither value is executed in-process.
-    args: { toolId: string; path?: string; arguments?: string };
+    // directory-scoped coding agents. `execute` immediately runs allow-listed
+    // coding agents; other CLI launchers keep an editable command prefill.
+    args: {
+      toolId: string;
+      path?: string;
+      arguments?: string;
+      execute?: boolean;
+    };
     result: void;
   };
   installer_launch_app: {
