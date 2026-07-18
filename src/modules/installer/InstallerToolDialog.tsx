@@ -1438,6 +1438,12 @@ function detectedProviderForRecipe(
     return recipe.downloadProvider;
   }
   if (
+    detected?.installProvider === "downloadInstaller" &&
+    recipe.downloadProvider?.kind === "downloadInstaller"
+  ) {
+    return recipe.downloadProvider;
+  }
+  if (
     detected?.installProvider === "npm" &&
     recipe.npmProvider?.kind === "npm"
   ) {
