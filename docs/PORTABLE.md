@@ -1,17 +1,25 @@
 # Portable Mode Plan
 
-Status: **Proposed** (planning document — no implementation yet).
+Status: **Accepted for implementation** (Windows portable v1 decisions approved
+2026-07-19; implementation has not started yet).
 
 This document plans a portable distribution of KKTerm: a ZIP the user unpacks
-anywhere (USB stick, network share, a plain folder) that runs without an
-installer, keeps *all* of its state next to the executable, leaves no trace in
-`%APPDATA%` / the registry, and can coexist with a normally installed KKTerm on
-the same machine.
+to a writable local folder or removable drive that runs without an installer,
+keeps KKTerm-owned durable state next to the executable, and can coexist with a
+normally installed KKTerm on the same machine.
 
-Windows is the primary target (portable apps are chiefly a Windows
-expectation; the NSIS installer is the current Windows channel). macOS and
-Linux notes are at the end — Linux AppImage is already "portable-ish" and can
-adopt the same marker convention later.
+"Portable" is a storage and packaging guarantee, not a claim that Windows can
+observe no activity. Normal launch must not intentionally write KKTerm-owned
+state to `%APPDATA%`, `%LOCALAPPDATA%`, or the KKTerm registry keys. Explicit
+host integrations can still change the computer: choosing the OS keychain,
+configuring an external MCP client, using the Install Helper, opening local
+shells, or launching third-party tools all use or modify host state by design.
+
+Portable v1 is **Windows-only**. Writable fixed/local drives and removable
+drives are supported. Network shares and cloud-synchronized portable roots are
+unsupported because SQLite WAL, WebView2 profiles, and concurrent file sync
+cannot be made reliable there. macOS and Linux portable modes require a later
+product decision; Linux AppImage packaging remains separate.
 
 ---
 
@@ -22,7 +30,9 @@ Where installed KKTerm keeps state today:
 | State | Location today | Portable-relevant code |
 | --- | --- | --- |
 | SQLite DB (`kkterm.sqlite3`), incl. encrypted secret store | `app_data_dir()` = `%APPDATA%\com.kkterm.app` | `lib.rs` setup (`db_path`) |
-| Backgrounds, fonts, assistant-skills, copilot workdir, MCP bridge info | `app_data_dir()` | `ai.rs`, `assistant_skills.rs`, `mcp_bridge.rs`, `media.rs`, `ssh.rs`, `sessions.rs`, `diagnostics.rs`, `webview.rs` |
+| Assistant skills, AI workdirs, diagnostics, terminal recordings, SSH known hosts, MCP bridge info | `app_data_dir()` | `ai.rs`, `assistant_skills.rs`, `mcp_bridge.rs`, `ssh.rs`, `sessions.rs`, `diagnostics.rs` |
+| Backgrounds and fonts | Windows executable directory; `app_data_dir()` on macOS/Linux | `media.rs` |
+| Runtime and advanced-debug logs | `Logs/` beside the executable, falling back to `%LOCALAPPDATA%\KKTerm\Logs` | `logging.rs` |
 | Update downloads | `app_cache_dir()/updates` | `app_updates.rs` |
 | WebView2 profile (localStorage: language, UI state, update-check timestamp; overlay browser partitions) | Tauri default (`%LOCALAPPDATA%\com.kkterm.app\EBWebView`); overlay webviews use per-proxy `data_directory` under `app_data_dir()` | `webview.rs:825` |
 | Secrets | OS keychain (`com.kkterm.app` service) **or** the already-shipped encrypted SQLite secret store ("file" store, master password) | `secrets.rs`, `secrets/sqlite_store.rs` |
@@ -55,28 +65,39 @@ ZIP contents / resulting folder layout:
 
 ```
 KKTerm/
-  KKTerm.exe                 same signed binary as the installed build
+  KKTerm.exe                 same release binary as the installed build
   kkterm-cli.exe             CLI sidecar
   kkterm-portable.marker     empty file; THE portable-mode switch
-  resources/                 bundled Tauri resources (manual/, assistant-skills/, …)
-  data/                      created on first run — everything lives here
+  resources/                 conceptual bundled-resource root; final physical
+                             shape follows verified Tauri resource resolution
+  data/                      created on first run — KKTerm-owned mutable state
     kkterm.sqlite3
     backgrounds/  fonts/  assistant-skills/  copilot/
-    cache/                   update downloads, favicon cache
+    cache/                   KKTerm-owned portable cache
     logs/
     webview/                 WebView2 user data folder (localStorage, overlay partitions)
     backups/                 startup/manual .kkbackup ZIPs
+    diagnostics/
+    terminal-recordings/
+    ssh_known_hosts
+    mcp-bridge.json          present only while the built-in MCP bridge runs
 ```
 
 Design rules:
 
 - **One binary, two modes.** No separate portable build; mode is decided at
   runtime (section 3). This keeps CI, signing, and the update matrix sane.
-- **`data/` is the only mutable location.** The app directory itself is only
-  touched by updates. This makes "back up the stick" = "copy the folder", and
-  lets updates replace binaries without touching user state.
+- **`data/` is the only location for KKTerm-owned mutable state.** The app
+  directory contains the binaries, bundled resources, and marker. Explicit
+  host integrations remain the documented exception. This makes "back up the
+  portable folder" a complete copy of KKTerm-owned portable state.
 - The marker ships inside the ZIP, so extraction alone activates portable
-  mode — no flags, no first-run choice dialog.
+  mode — no launch flags and no first-run mode-selection dialog.
+- The ZIP never contains `data/`; extracting a newer ZIP over the portable
+  program folder must not overwrite user data.
+- The packaging smoke test must verify that the built-in manual and bundled
+  assistant skills resolve through Tauri at runtime. The physical resource
+  layout must not be assumed from the conceptual tree above.
 
 ---
 
@@ -84,26 +105,36 @@ Design rules:
 
 ### Detection order
 
-1. `KKTERM_PORTABLE=0|1` environment variable — explicit override for dev and
-   troubleshooting.
-2. `kkterm-portable.marker` file in the executable's directory → portable.
-3. Otherwise → installed mode (today's behavior, byte-for-byte unchanged).
+1. In development and automated tests only, an explicit environment override
+   may force portable or installed mode.
+2. In release builds, `kkterm-portable.marker` in the executable's directory
+   activates portable mode.
+3. Otherwise the app runs in installed mode, preserving today's paths and
+   behavior.
 
-The NSIS installer must never ship the marker, so an installed copy can never
-accidentally flip modes.
+The NSIS installer must never ship the marker, so an installed copy cannot
+accidentally flip modes. Conversely, if `data/kkterm.sqlite3` exists beside the
+executable but the marker is missing, startup must show a native error and exit
+instead of silently entering installed mode and splitting state across roots.
 
 ### Writability guard
 
-Portable mode requires `exe_dir/data` to be creatable/writable. On failure
-(Program Files, read-only media, locked-down share): show a native error
-dialog explaining the problem and exit — do **not** silently fall back to
-`%APPDATA%`, which would split the user's data across two roots. The dialog
-copy suggests moving the folder somewhere writable.
+Portable mode requires `exe_dir/data` to be creatable and writable. Startup
+must perform an actual create/write/delete probe, not just inspect permission
+metadata. Reject UNC roots and drives Windows reports as remote, including
+mapped network drives. On failure (Program Files, read-only media,
+policy-restricted location, or remote drive): show a native error dialog
+explaining the problem and exit — do **not** silently fall back to `%APPDATA%`,
+which would split the user's data across two roots. The dialog suggests moving
+the folder to a writable local or removable drive.
 
 ### `AppPaths` abstraction — the core refactor
 
-Introduce one backend module (e.g. `src-tauri/src/app_paths.rs`) resolved once
-in `main()` before the Tauri builder runs:
+Introduce one backend module (e.g. `src-tauri/src/app_paths.rs`). Portable mode,
+the executable directory, writable data root, WebView2 root, logging root, and
+data-root identity must be known before logging or the Tauri builder starts.
+Installed-mode Tauri paths can then complete the managed state during setup
+without changing their current resolution:
 
 ```rust
 pub struct AppPaths {
@@ -111,43 +142,54 @@ pub struct AppPaths {
     pub data_dir: PathBuf,      // installed: app_data_dir(); portable: exe_dir/data
     pub cache_dir: PathBuf,     // installed: app_cache_dir(); portable: data/cache
     pub logs_dir: PathBuf,
-    pub webview_data_dir: PathBuf,
+    pub webview_data_dir: Option<PathBuf>, // installed: Tauri default; portable: data/webview
+    pub media_dir: PathBuf,
+    pub diagnostics_dir: PathBuf,
+    pub recordings_dir: PathBuf,
+    pub known_hosts_path: PathBuf,
 }
 ```
 
-Then sweep every `app.path().app_data_dir()` / `app_cache_dir()` call site
-(`lib.rs`, `ai.rs`, `mcp_bridge.rs`, `media.rs`, `ssh.rs`, `sessions.rs`,
-`assistant_skills.rs`, `diagnostics.rs`, `webview.rs`, `app_updates.rs`,
-`ai/cli_backend.rs`, `ai/openai_provider.rs`) to go through managed
-`AppPaths` state instead. This sweep is the bulk of Phase 1 and is valuable
-on its own (single choke point for all durable paths).
+Then route every KKTerm-owned durable-path call site (`lib.rs`, `ai.rs`,
+`mcp_bridge.rs`, `media.rs`, `ssh.rs`, `sessions.rs`, `assistant_skills.rs`,
+`diagnostics.rs`, `webview.rs`, `app_updates.rs`, `ai/cli_backend.rs`, and
+`ai/openai_provider.rs`) through managed `AppPaths` state. Do not mechanically
+replace host-discovery paths such as `%LOCALAPPDATA%` Install Helper targets,
+third-party CLI configuration, browser imports, or user-selected filesystem
+paths. Add a policy test that leaves only a documented allowlist of direct
+`app_data_dir()` / `app_cache_dir()` calls.
 
 Specific integration points:
 
-- **WebView2 profile**: set the user data folder to `AppPaths.webview_data_dir`
-  before any webview is created (`WEBVIEW2_USER_DATA_FOLDER` env var set in
-  `main()` is the reliable Tauri v2 route). This makes localStorage — active
-  locale, durable UI state, last-update-check — travel with the stick with
-  zero frontend changes. Overlay URL-Connection webviews already derive their
-  per-proxy `data_directory` from the app data dir, so they follow the sweep
-  automatically.
+- **WebView2 profile**: in portable mode, set the user data folder to the
+  resolved portable override before any webview is created
+  (`WEBVIEW2_USER_DATA_FOLDER` env var set in `main()` is the reliable Tauri v2
+  route). Installed mode leaves Tauri's existing default untouched. This makes
+  localStorage — active locale, durable UI state, last-update-check — travel
+  with the drive with zero frontend changes. Overlay URL-Connection webviews
+  derive their per-proxy `data_directory` from managed app data after the
+  path sweep.
 - **Asset protocol scope**: `tauri.conf.json` scopes `$APPDATA/backgrounds`
   and `$APPDATA/fonts`, which won't match the portable root. At setup, when
-  portable, extend the asset scope at runtime to allow
-  `data/backgrounds/**` and `data/fonts/**` (Tauri v2 runtime scope API).
-- **Single instance**: the plugin keys on the app identifier, so an installed
-  copy and a portable copy (or two different sticks) would block each other.
-  Scope the single-instance key by a short hash of the canonical data root so
-  each *root* is single-instanced independently.
+  portable, extend the asset scope at runtime only for the resolved portable
+  backgrounds and fonts directories.
+- **Single instance**: the current Tauri plugin derives its Windows mutex and
+  hidden-window names from the static app identifier and exposes no Windows
+  per-instance key. Keep installed behavior unchanged and add an app-owned
+  Windows single-instance implementation for portable mode, scoped by a short
+  hash of the canonical data root. Each portable root is single-instanced;
+  installed and portable roots, and two distinct portable roots, may run
+  simultaneously.
 - **MCP bridge / CLI**: pipe names are already per-run random tokens, so no
-  collision. What must change is discovery: the bridge info file moves into
-  `AppPaths.data_dir`, and `kkterm-cli` gains a lookup order of
-  (1) `../data/mcp-bridge.json` relative to its own exe (portable layout),
-  (2) the current `%APPDATA%` path. Each CLI thereby finds *its own* app when
-  both instances run simultaneously.
-- **SQLite on removable media**: keep the existing journal mode but ensure a
-  clean WAL checkpoint + close on exit so yanking the stick after quit is
-  safe. (Already largely true; verify during Phase 1 testing.)
+  collision. The bridge info file moves into `AppPaths.data_dir`. When
+  `kkterm-cli` is beside a portable marker, it may look up only its sibling
+  `data/mcp-bridge.json`; if that portable app is not running it reports the
+  bridge unavailable and must not fall back to the installed instance. A CLI
+  without the sibling marker retains the current installed lookup.
+- **SQLite on removable media**: keep the existing best-effort WAL behavior,
+  verify checkpoint/close on normal process exit, and document that the user
+  must quit KKTerm before removing the drive. Do not add database backups to
+  the app-window close path.
 
 ### Registry and machine-state gating
 
@@ -176,36 +218,30 @@ In portable mode:
 
 ## 4. Updates in portable mode
 
-The installed-Windows flow (download NSIS exe → verify sha256 → PowerShell
-handoff after exit) is the template; portable branches inside the same
-`app_updates.rs` machinery:
+Portable v1 uses **manual ZIP updates**. It does not download, stage, swap, or
+roll back its own executable. This is intentional while Authenticode/Tauri
+updater signing is unfinished and avoids introducing a self-replacing binary
+flow with additional antivirus and recovery risk.
 
-1. **Asset selection**: portable mode requests
-   `kkterm-{v}-windows-{arch}-portable.zip` (+ `.sha256`) from the same two
-   trusted sources (GitHub Releases, `kkterm.ryantsai.com` mirror) with the
-   same URL validation and fallback order. `validate_update_request` becomes
-   mode-aware — a portable instance must *never* accept/spawn a `-setup.exe`
-   (which would silently create an installed copy), and vice versa.
-2. **Download + verify** into `data/cache/updates/` exactly as today
-   (progress events, cancellation, checksum).
-3. **Extract** to `data/cache/updates/staged-{v}/` and sanity-check the staged
-   tree (contains `KKTerm.exe`, version resource matches).
-4. **Swap via handoff**: a running exe can't overwrite itself on Windows, so
-   reuse the existing PowerShell handoff pattern: wait for app exit → copy
-   staged binaries + `resources/` over the app dir (**never touching `data/`
-   or the marker**) → relaunch `KKTerm.exe` → clean the staging dir. Keep the
-   previous exe as `KKTerm.exe.bak` for one generation as a manual rollback.
-5. **Failure modes**: locked files (second instance from the same folder) →
-   handoff retries briefly then leaves the staged dir in place; next launch
-   detects a completed download and offers "retry update".
+1. Update checks continue to use the current trusted release metadata sources
+   and cadence. The main WebView2 profile lives in `data/webview`, so the
+   `lastUpdateCheck` localStorage value travels with the portable root.
+2. When an update is available, the portable prompt identifies it as a
+   Portable ZIP update and offers the matching download page/ZIP rather than
+   "Download and Install".
+3. The user quits KKTerm, extracts the new portable ZIP over the existing
+   program folder, and launches it again. Because release ZIPs never contain
+   `data/`, this replaces program files without overwriting portable state.
+4. Backend validation becomes mode-aware even though portable v1 does not
+   self-install: a portable process must reject `-setup.exe` update requests,
+   and an installed process must reject portable ZIP requests. A portable
+   instance must never launch NSIS and silently create an installed copy.
+5. Documentation must tell users to keep a copy of the old program folder if
+   they want manual rollback. KKTerm does not create or manage rollback files
+   in portable v1.
 
-Update *checks* (frontend, `lastUpdateCheck` in localStorage) are unchanged —
-the WebView2 profile now lives in `data/`, so the cadence travels too.
-
-Fallback for v1 if the swap handoff slips: portable update = download +
-verify + open the folder with a "close KKTerm and extract over the old
-folder" instruction. Acceptable, but the handoff is strongly preferred and
-is mostly code reuse.
+Automated ZIP download/verification, staged replacement, relaunch, and managed
+rollback require a separate future design after release signing is restored.
 
 ---
 
@@ -220,11 +256,13 @@ unlock, lock/unlock lifecycle — all shipped).
 Plan:
 
 - **Portable default**: first run in portable mode defaults
-  `credential_settings.secret_store` to `"file"` and runs a small onboarding
-  step (section 6) to create the master password, reusing the existing
-  configure/unlock dialogs.
+  `credential_settings.secret_store` to `"file"` when no credential-setting
+  row exists. The onboarding recommends master-password setup but is
+  **skippable**. If the user skips it, the existing deferred setup/unlock flow
+  runs when a feature first needs to save or read an encrypted secret.
 - **Explicit opt-out**: the user may still pick the OS keychain in portable
-  mode, but the Settings copy warns that those secrets stay on the current
+  mode from Settings, but onboarding does not promote that machine-bound
+  choice. Credentials Settings warns that those secrets stay on the current
   machine. (Owner IDs are per-DB UUIDs, so sharing the `com.kkterm.app`
   keychain service with an installed instance cannot collide.)
 - **No password material near the stick**: documentation and UI must never
@@ -253,24 +291,28 @@ pending file per key under `docs/localization_todo/`).
   `{ mode, dataDir }`. Settings → About shows a "Portable" badge, the data
   folder path, and an "Open data folder" button. The title bar and the rest
   of the chrome stay identical — portable is not a different product.
-- **First-run portable onboarding** (one dialog, not a wizard):
-  1. "KKTerm is running in portable mode — everything stays in this folder."
-  2. Master-password creation for the encrypted secret store (reuses the
-     existing encrypted-store configure dialog), with "use this computer's
-     keychain instead" as the escape hatch (plus the non-portability warning).
-  3. Optional "Import from backup (.kkbackup)" shortcut.
+- **First-run portable onboarding** (one concise, skippable dialog, not a
+  wizard): show the portable data path, explain that passwords can be
+  encrypted while non-secret Connection/settings data remains plaintext, and
+  offer three actions: auxiliary "Import backup", primary "Set up encrypted
+  storage", and dismiss "Not now". Close onboarding before opening the reused
+  encrypted-store or selective-import dialog; never nest dialogs. Do not put
+  the OS keychain choice in onboarding.
 - **Settings deltas in portable mode**:
   - General → auto-start toggle hidden.
   - Credentials → "file" store shown as recommended; OS store carries the
     machine-bound warning.
-  - About/Update → update panel says "Portable ZIP update", shows staged
-    version + "Restart to update", and the rollback hint after an update.
+  - General/Update → update panel says "Portable ZIP update" and opens the
+    matching portable download rather than offering installer handoff.
+  - About → portable badge, exact data path, and Open Data Folder action.
   - Install Helper → caption that installs are machine-local.
-- **Update flow UX**: reuse the existing download-progress UI; only the copy
-  and the final action ("Restart to update" instead of "Install") differ.
+- **No permanent mode chrome**: do not add a title-bar badge, alternate theme,
+  or duplicate product identity. Portable mode stays inspectable in About and
+  appears only where it changes a decision.
 - **Manual**: extend `docs/manual/17-data-backup-secrets.md` (data location
   table gains the portable column) and `docs/manual/15-settings.md`
-  (mode badge, hidden auto-start); reference i18n keys, not English labels.
+  (mode badge, hidden auto-start), plus `docs/manual/18-installer.md` for the
+  machine-local Install Helper notice; reference i18n keys, not English labels.
 
 ---
 
@@ -281,80 +323,91 @@ Guaranteed by construction, verified by tests:
 | Concern | Resolution |
 | --- | --- |
 | Data mixing | Impossible — disjoint roots (`%APPDATA%` vs `exe_dir/data`); no fallback path ever crosses over (see writability guard). |
-| Both running at once | Supported: single-instance key is scoped per data root. Two copies of the *same* portable folder remain single-instanced. |
-| CLI targets the wrong app | CLI resolves its sibling app first (relative `data/mcp-bridge.json`), so each CLI drives its own instance. Pipe names are already per-run tokens. |
-| Updates cross-contaminate | Mode-aware asset validation: portable only accepts `-portable.zip`, installed only `-setup.exe`. |
+| Both running at once | Supported: the app-owned portable single-instance identity is scoped per data root. Two copies of the *same* portable folder remain single-instanced. |
+| CLI targets the wrong app | A CLI beside the portable marker resolves only sibling `data/mcp-bridge.json`; it never falls back to the installed app. Pipe names remain per-run tokens. |
+| Updates cross-contaminate | Portable v1 uses manual ZIP updates, and mode-aware backend validation rejects installer assets from portable processes and ZIP assets from installed processes. |
 | Keychain overlap | Same service name is fine — owner IDs are per-DB UUIDs; portable default is the file store anyway. |
 | WebView2 profiles | Disjoint (`data/webview` vs `%LOCALAPPDATA%\com.kkterm.app\EBWebView`). |
 | Managed apps / Install Helper | Shared machine state by design; both instances see the same installed tools — that is the correct model. |
-| Uninstalling the installed copy | NSIS uninstall never touches the portable folder; deleting the portable folder removes 100% of portable state (that's the point). |
+| Uninstalling/deleting | NSIS uninstall never touches the portable folder. Deleting the portable folder removes KKTerm-owned portable state; explicit host integrations such as OS-keychain entries or installed tools remain host-owned. |
 
 ---
 
 ## 8. Packaging and release pipeline
 
-- **`scripts/package-portable.ps1`** (+ arm64 variant or a `-Arch` switch):
-  runs after the normal `tauri build`, assembles the ZIP from the already
-  signed `KKTerm.exe`, `kkterm-cli.exe`, the bundled `resources/` tree, and a
-  freshly created `kkterm-portable.marker`; emits the `.sha256`.
+- **`scripts/package-portable.ps1`** with an `-Arch` switch: runs after the
+  normal Tauri release build and assembles the ZIP from the exact same release
+  `KKTerm.exe` used by the installer build, `kkterm-cli.exe`, the verified
+  Tauri resource layout, and a freshly created `kkterm-portable.marker`; emits
+  the `.sha256`. "Same release executable" is the current guarantee;
+  Authenticode signing becomes part of that guarantee when signing is restored.
 - **Release scripts** (`release-github*.ps1`) upload the portable assets;
   `sync-cloudflare-release.mjs` mirrors them; `generate-release-notes.mjs`
   lists them.
 - **`scripts/smoke-portable.ps1`**: extract to a temp dir, launch, assert
   (a) `data/` appears next to the exe with the DB inside, (b) nothing new
-  under `%APPDATA%\com.kkterm.app` / `%LOCALAPPDATA%\com.kkterm.app`,
+  in the known KKTerm-owned paths under `%APPDATA%` / `%LOCALAPPDATA%`,
   (c) no HKCU auto-start or detection-cache keys created, (d) second launch
   from the same folder focuses the first (single instance), (e) app exits
-  cleanly (WAL checkpointed).
+  cleanly (WAL checkpointed), and (f) the bundled manual and assistant skills
+  resolve in the packaged runtime. The smoke test uses only an explicit
+  temporary extraction directory and exact registry/path snapshots; it must
+  not delete broad user-data roots.
 - **Docs**: README download table, `docs/SITE.md`/site release worker if it
   lists assets, `docs/ANTIVIRUS.md` (portable ZIPs are more often flagged
-  than signed installers — same signed exe inside mitigates; document how to
-  report false positives).
+  than installers; publish checksums, restore Authenticode signing when
+  available, and document how to report false positives).
 
 ---
 
 ## 9. Phasing
 
-Each phase is shippable and independently testable.
+Each phase is independently testable. The public portable release ships only
+after phases 1–4 are complete.
 
-1. **Path core** — `AppPaths` module + detection + writability guard; sweep
-   all `app_data_dir`/`app_cache_dir` call sites; WebView2 profile
-   redirection; asset-scope extension; single-instance scoping; CLI bridge
-   discovery; registry gating (auto-start, detection cache). Gated behind
-   `KKTERM_PORTABLE=1` for dev; no packaging yet. Regression risk lives
-   here, so it lands first and alone.
-2. **Secrets + UX** — portable default to the file store, first-run
-   onboarding, Settings badge/deltas, `get_app_mode`, i18n keys + pending
-   localization files, manual updates.
-3. **Packaging** — portable ZIP scripts, release/mirror/notes integration,
-   smoke script. First public portable release can ship after this phase
-   with manual updates only.
-4. **Portable updater** — ZIP download/verify/stage/swap-handoff/rollback,
-   mode-aware validation, update-panel copy.
-5. **Later / out of scope for v1** — Linux (mark AppImage layouts the same
-   way), macOS portable-style bundle, optional full-DB encryption, optional
-   machine-local WebView2 profile redirect for very slow USB media.
+1. **Path core** — early mode detection, missing-marker and writability guards,
+   managed `AppPaths`, logging/WebView2 redirection, asset-scope extension, and
+   the audited durable-path sweep. Development/tests may force mode before any
+   portable package exists. Installed behavior must remain unchanged.
+2. **Host-state + coexistence** — portable Windows single-instance handling,
+   marker-aware CLI bridge discovery, auto-start gating, in-memory Install
+   Helper detection cache, mode-aware update validation, and clean SQLite exit
+   verification.
+3. **Secrets + UX** — portable default to the file store when unset,
+   skippable onboarding, Settings deltas, typed app-mode/data-path access, i18n
+   keys plus pending localization files, and operation-manual updates.
+4. **Packaging + release** — x64/ARM64 ZIP and checksum generation,
+   release/mirror/notes integration, README/antivirus guidance, and the portable
+   smoke test. Portable v1 ships with manual ZIP updates.
+5. **Later / out of scope for v1** — portable self-update/staging/rollback,
+   macOS/Linux portable modes, network-share roots, cloud-synchronized roots,
+   full-database encryption, and a machine-local WebView2 profile redirect.
 
 ---
 
-## 10. Risks and open questions
+## 10. Risks and resolved product decisions
 
 - **Slow/flaky removable media**: SQLite + WebView2 profile on a slow USB 2
-  stick will feel it. Mitigation options (later phase): allow redirecting
-  `data/webview` to machine-local temp via a `portable.toml` next to the
-  marker.
-- **Cloud-synced folders** (OneDrive/Dropbox): two machines syncing one
-  portable folder can corrupt the DB via concurrent WAL sync. Document as
-  unsupported; the single-instance scope only protects one machine.
-- **FAT32/exFAT sticks**: fine for SQLite; no named-pipe or permission
-  issues (pipes are kernel objects, not files). Long-path support should be
-  verified in the smoke test (deeply nested extraction paths).
-- **Antivirus heuristics**: self-replacing exe during portable update is a
-  classic false-positive trigger; the handoff pattern is already shipped for
-  NSIS, but the ZIP swap should be watched in early releases.
-- **Open question — marker vs. `data/` presence**: this plan uses an explicit
-  marker only (predictable, greppable, can't be spoofed by a stray folder).
-  Confirm before Phase 1.
-- **Open question — portable first-run language**: localStorage starts empty
-  in a fresh `data/`, so the locale defaults to system detection, same as a
-  fresh install. Probably fine; noting it so it isn't reported as a bug.
+  stick will feel it. Portable v1 keeps the WebView2 profile portable anyway;
+  redirecting it to host storage would weaken the core guarantee and is not a
+  v1 option.
+- **Network/cloud roots**: network shares, OneDrive, Dropbox, and equivalent
+  synchronized roots are unsupported. The UI error/manual copy must recommend
+  a writable local or removable drive.
+- **Removable filesystems**: FAT32/exFAT and deeply nested extraction paths
+  require real smoke/manual coverage. The app must surface initialization or
+  SQLite failures instead of assuming all removable filesystems behave alike.
+- **Antivirus heuristics**: portable ZIPs are commonly scrutinized more than
+  installers. Portable v1 avoids self-replacement; publish SHA-256 checksums
+  and document false-positive reporting. Restored Authenticode signing remains
+  a release goal.
+- **Marker decision**: the explicit `kkterm-portable.marker` is the production
+  mode switch. A portable-shaped database without the marker is treated as an
+  ambiguous/error state, never as permission to silently use installed paths.
+- **First-run language**: a new `data/webview` profile has no stored locale, so
+  the existing system-language detection is the accepted portable first-run
+  behavior.
+- **Credentials onboarding**: encrypted portable credentials are recommended,
+  but setup is skippable and deferred until first secret use when skipped.
+- **Updates**: portable v1 updates are manual ZIP replacement. Self-update and
+  managed rollback remain out of scope until separately designed.
