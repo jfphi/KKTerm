@@ -59,3 +59,11 @@ test("running stages keep a progress track visible without a determinate ratio",
     /status === "running"[\s\S]*?<progress[\s\S]*?value=\{ratio \?\? undefined\}/,
   );
 });
+
+test("long install commands wrap inside the progress dialog header", async () => {
+  const installerCss = await read("../src/modules/installer/installer.css");
+  assert.match(
+    installerCss,
+    /\.installer-tool-dialog__header-sub\s*\{[\s\S]*?overflow-wrap:\s*anywhere;/,
+  );
+});
