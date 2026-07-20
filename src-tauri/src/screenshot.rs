@@ -1452,8 +1452,9 @@ mod platform {
                             DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY,
                             DXGI_SAMPLE_DESC,
                         },
-                        CreateDXGIFactory1, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter, IDXGIAdapter1,
-                        IDXGIFactory1, IDXGIOutput, IDXGIOutput1, IDXGIResource,
+                        CreateDXGIFactory1, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+                        IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
+                        IDXGIResource,
                     },
                 },
             },
@@ -1574,9 +1575,22 @@ mod platform {
                 for attempt in 1..=DXGI_FRAME_ATTEMPTS {
                     let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
                     let mut resource: Option<IDXGIResource> = None;
-                    duplication
-                        .AcquireNextFrame(DXGI_FRAME_TIMEOUT_MS, &mut frame_info, &mut resource)
-                        .map_err(|error| format!("failed to acquire DXGI frame: {error}"))?;
+                    match duplication.AcquireNextFrame(
+                        DXGI_FRAME_TIMEOUT_MS,
+                        &mut frame_info,
+                        &mut resource,
+                    ) {
+                        Ok(()) => {}
+                        Err(error) if error.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                            log_dxgi(&format!(
+                                "frame attempt {attempt}/{DXGI_FRAME_ATTEMPTS}: acquire timed out after {DXGI_FRAME_TIMEOUT_MS}ms"
+                            ));
+                            continue;
+                        }
+                        Err(error) => {
+                            return Err(format!("failed to acquire DXGI frame: {error}"));
+                        }
+                    }
                     let _frame_guard = FrameGuard {
                         duplication: duplication.clone(),
                     };
@@ -1589,9 +1603,6 @@ mod platform {
                         frame.total_metadata_buffer_size,
                         frame.protected_content_masked_out
                     ));
-                    if !frame_has_desktop_update(&frame) {
-                        continue;
-                    }
 
                     let resource =
                         resource.ok_or_else(|| "DXGI frame resource is empty".to_string())?;
@@ -1599,7 +1610,10 @@ mod platform {
                         .cast()
                         .map_err(|error| format!("failed to read DXGI frame texture: {error}"))?;
 
-                    return copy_desktop_texture_to_dib(
+                    // The duplication surface always holds the full current desktop,
+                    // even for pointer-only frames where every frame-info counter is
+                    // zero, so copy unconditionally instead of gating on frame stats.
+                    let pixels = copy_desktop_texture_to_pixels(
                         &device,
                         &context,
                         &desktop_texture,
@@ -1608,16 +1622,24 @@ mod platform {
                         y,
                         width,
                         height,
-                    );
+                    )?;
+                    let sample = sample_non_black_pixel(&pixels, width as u32, height as u32);
+                    log_dxgi(&format!("first non-black pixel sample: {:?}", sample));
+                    if sample.is_none() {
+                        // A fresh duplication can hand back an unpopulated all-black
+                        // surface (notably over RDP); retry before falling back.
+                        continue;
+                    }
+                    return bgra_pixels_to_dib(&pixels, width, height);
                 }
 
                 Err(format!(
-                    "DXGI did not acquire a desktop image update after {DXGI_FRAME_ATTEMPTS} attempts"
+                    "DXGI returned only black or timed-out frames after {DXGI_FRAME_ATTEMPTS} attempts"
                 ))
             }
         }
 
-        unsafe fn copy_desktop_texture_to_dib(
+        unsafe fn copy_desktop_texture_to_pixels(
             device: &ID3D11Device,
             context: &ID3D11DeviceContext,
             desktop_texture: &ID3D11Texture2D,
@@ -1694,12 +1716,8 @@ mod platform {
                     let target_start = row * row_bytes;
                     pixels[target_start..target_start + row_bytes].copy_from_slice(source);
                 }
-                log_dxgi(&format!(
-                    "first non-black pixel sample: {:?}",
-                    sample_non_black_pixel(&pixels, width as u32, height as u32)
-                ));
 
-                bgra_pixels_to_dib(&pixels, width, height)
+                Ok(pixels)
             }
         }
 
@@ -1790,12 +1808,6 @@ mod platform {
                     protected_content_masked_out: frame_info.ProtectedContentMaskedOut.as_bool(),
                 }
             }
-        }
-
-        fn frame_has_desktop_update(frame: &DxgiFrameStats) -> bool {
-            frame.last_present_time != 0
-                || frame.accumulated_frames > 0
-                || frame.total_metadata_buffer_size > 0
         }
 
         #[derive(Clone, Copy, Debug)]
@@ -1909,32 +1921,6 @@ mod platform {
         #[cfg(test)]
         mod tests {
             use super::*;
-
-            #[test]
-            fn dxgi_rejects_pointer_only_frame() {
-                let frame = DxgiFrameStats {
-                    last_present_time: 0,
-                    last_mouse_update_time: 12,
-                    accumulated_frames: 0,
-                    total_metadata_buffer_size: 0,
-                    protected_content_masked_out: false,
-                };
-
-                assert!(!frame_has_desktop_update(&frame));
-            }
-
-            #[test]
-            fn dxgi_accepts_desktop_frame() {
-                let frame = DxgiFrameStats {
-                    last_present_time: 15,
-                    last_mouse_update_time: 0,
-                    accumulated_frames: 1,
-                    total_metadata_buffer_size: 16,
-                    protected_content_masked_out: false,
-                };
-
-                assert!(frame_has_desktop_update(&frame));
-            }
 
             #[test]
             fn dxgi_rejects_rotated_output_before_copy() {
