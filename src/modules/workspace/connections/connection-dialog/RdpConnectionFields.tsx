@@ -11,7 +11,7 @@ import {
   type StoredCredentialSummary,
 } from "../../../../types";
 import { defaultPortForConnectionType } from "../utils";
-import { PasswordCredentialSelect, PasswordField } from "./ConnectionPasswordFields";
+import { PasswordCredentialModeFields } from "./ConnectionPasswordFields";
 import { RdpLocalResourceSelector } from "../remote-desktop/RdpLocalResourceSelector";
 import { normalizeRdpDriveSelection, normalizeRdpSharedLocalFolders } from "../remote-desktop/rdpLocalResources";
 
@@ -82,16 +82,14 @@ export function RdpConnectionFields({
             required
           />
         </label>
-        <PasswordField
+        <PasswordCredentialModeFields
+          credentials={matchingPasswordCredentials}
+          defaultMode={initialConnection?.passwordCredentialId ? "saved" : "new"}
           hasStoredSecret={isEditMode && hasStoredConnectionPassword}
           label={t("connections.password")}
-          name="password"
           placeholder={isEditMode ? t("connections.leaveBlankPassword") : t("connections.storedInKeychain")}
-        />
-        <PasswordCredentialSelect
-          credentials={matchingPasswordCredentials}
-          onChange={onSelectedPasswordCredentialIdChange}
           selectedCredentialId={selectedPasswordCredentialId}
+          onSelectedCredentialIdChange={onSelectedPasswordCredentialIdChange}
         />
       </div>
     </>

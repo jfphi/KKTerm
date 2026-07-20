@@ -81,7 +81,7 @@ import { confirmNativeDialog, invokeCommand, isCredentialUnlockRequiredError, is
 import { connectionTree } from "../../../app-defaults";
 import { DeleteConfirmationDialog } from "../../../app/DeleteConfirmationDialog";
 import { DialogPortal } from "../../../app/DialogPortal";
-import { ConfirmSheet, LegacyDialogActions } from "../../../app/ui/dialog";
+import { Btn, ConfirmSheet, LegacyDialogActions } from "../../../app/ui/dialog";
 import { pushTrayMenu } from "../../../app/trayMenu";
 import { CHILD_CONNECTION_CLOSED_EVENT, DEFAULT_WORKSPACE_ID, appendTmuxSessionId, forgetConnectionLocalState, useWorkspaceStore } from "../../../store";
 import type { Connection, ConnectionFolder, ConnectionStatus, ConnectionTree, ConnectionType, CreateConnectionRequest, RdpSettings, SplitDirection, SshCompressionMode, SshOldProtocolsMode, SshSettings, StoredCredentialSummary, UpdateConnectionRequest, VncSettings, WorkspaceChildConnection, WorkspaceTab } from "../../../types";
@@ -264,6 +264,14 @@ type PendingPanorama = {
   newSessionCount: number;
 };
 
+type PendingSharedCredentialUpdate = {
+  credentialId: string;
+  isCredentialRow: boolean;
+  label: string;
+  usageCount: number;
+  request: ConnectionDialogRequest;
+};
+
 const QUICK_CONNECT_RECENT_TOP_LEVEL_LIMIT = 5;
 const QUICK_CONNECT_RECENT_SUBMENU_LIMIT = 20;
 
@@ -353,6 +361,8 @@ export function ConnectionSidebar({
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<DeleteTarget | null>(null);
   const [pendingPanorama, setPendingPanorama] = useState<PendingPanorama | null>(null);
+  const [pendingSharedCredentialUpdate, setPendingSharedCredentialUpdate] =
+    useState<PendingSharedCredentialUpdate | null>(null);
   // Ephemeral filter: only show connections with a live session. Not persisted
   // because "currently connected" is meaningless across restarts.
   const [showConnectedOnly, setShowConnectedOnly] = useState(false);
@@ -1228,6 +1238,7 @@ export function ConnectionSidebar({
       request: {
         connectionId,
         secret: password,
+        allowReuse: true,
       },
     });
   }
@@ -1428,7 +1439,10 @@ export function ConnectionSidebar({
     }
   }
 
-  async function handleConnectionUpdate(request: ConnectionDialogRequest) {
+  async function handleConnectionUpdate(
+    request: ConnectionDialogRequest,
+    options?: { skipSharedCredentialCheck?: boolean },
+  ) {
     if (!editConnection) {
       return;
     }
@@ -1437,6 +1451,40 @@ export function ConnectionSidebar({
     const currentConnection = findConnectionInTree(treeRef.current, editConnection.connection.id);
     if (!currentConnection) {
       setFormError(t("connections.connectionNotFound"));
+      return;
+    }
+    const linkedCredentialId = currentConnection.connection.passwordCredentialId;
+    if (request.password && linkedCredentialId && !options?.skipSharedCredentialCheck) {
+      // The Connection is linked to a saved credential and the user typed a new
+      // password: ask whether to rotate the shared credential (all linked
+      // Connections pick it up) or create a separate credential for this one.
+      let isCredentialRow = false;
+      let label = linkedCredentialId;
+      try {
+        const entries = await invokeCommand("list_connection_password_credentials", undefined);
+        const entry = entries.find((candidate) => candidate.id === linkedCredentialId);
+        if (entry) {
+          isCredentialRow = true;
+          label = entry.label;
+        }
+      } catch {
+        // Fall back to the raw id; the confirm still works.
+      }
+      if (!isCredentialRow) {
+        label =
+          findConnectionInTree(treeRef.current, linkedCredentialId)?.connection.name ??
+          linkedCredentialId;
+      }
+      const usageCount = flattenConnections(treeRef.current).filter(
+        (connection) => connection.passwordCredentialId === linkedCredentialId,
+      ).length;
+      setPendingSharedCredentialUpdate({
+        credentialId: linkedCredentialId,
+        isCredentialRow,
+        label,
+        usageCount,
+        request,
+      });
       return;
     }
     const { iconColor, iconDataUrl, iconBackgroundColor, password, passwordCredentialId, keyPassphrase, sshSocksProxyPassword, urlCredentialUsername, urlPassword, sshStartupScriptApplyToExistingTmux, ...connectionRequest } = request;
@@ -1488,6 +1536,29 @@ export function ConnectionSidebar({
     } catch (error) {
       showConnectionFormError(error);
     }
+  }
+
+  async function applyPendingSharedCredentialUpdate(pending: PendingSharedCredentialUpdate) {
+    const password = pending.request.password ?? "";
+    try {
+      if (password && pending.isCredentialRow) {
+        await invokeCommand("update_connection_password_credential", {
+          request: { credentialId: pending.credentialId, secret: password },
+        });
+      } else if (password) {
+        await invokeCommand("store_secret", {
+          request: { kind: "connectionPassword", ownerId: pending.credentialId, secret: password },
+        });
+      }
+      showConnectionSuccessStatus(t("settings.savedCredentialSaved"));
+    } catch (error) {
+      showConnectionFormError(error);
+      return;
+    }
+    await handleConnectionUpdate(
+      { ...pending.request, password: "" },
+      { skipSharedCredentialCheck: true },
+    );
   }
 
   async function handleConnectionDuplicate(request: ConnectionDialogRequest) {
@@ -3435,6 +3506,35 @@ export function ConnectionSidebar({
             setFormError("");
           }}
           onSubmit={handleConnectionUpdate}
+        />
+      ) : null}
+      {pendingSharedCredentialUpdate ? (
+        <ConfirmSheet
+          tone="warn"
+          zClassName="kk-qc-subdialog"
+          title={t("connections.sharedCredentialUpdateTitle")}
+          message={t("connections.sharedCredentialUpdateBody", {
+            label: pendingSharedCredentialUpdate.label,
+            count: pendingSharedCredentialUpdate.usageCount,
+          })}
+          confirmLabel={t("connections.sharedCredentialUpdateShared")}
+          extraLeft={
+            <Btn
+              onClick={() => {
+                const pending = pendingSharedCredentialUpdate;
+                setPendingSharedCredentialUpdate(null);
+                void handleConnectionUpdate(pending.request, { skipSharedCredentialCheck: true });
+              }}
+            >
+              {t("connections.sharedCredentialCreateSeparate")}
+            </Btn>
+          }
+          onCancel={() => setPendingSharedCredentialUpdate(null)}
+          onConfirm={() => {
+            const pending = pendingSharedCredentialUpdate;
+            setPendingSharedCredentialUpdate(null);
+            void applyPendingSharedCredentialUpdate(pending);
+          }}
         />
       ) : null}
       {duplicateConnection ? (

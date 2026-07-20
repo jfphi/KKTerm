@@ -49,7 +49,7 @@ On import, KKTerm lets the user choose an action per segment present: `settings.
 
 Settings → Credentials (`settings.sectionCredentials`) lists every credential KKTerm has stored, grouped by kind:
 
-- `settings.credentialKindConnectionPassword` — SSH / RDP / VNC / Telnet / FTP passwords, including reusable saved-password credentials selected from Add/Edit Connection.
+- `settings.savedCredentials` — reusable SSH / RDP / VNC / Telnet / FTP password bundles that Connections link to. Rows support rename/password Edit, a usage dialog listing and bulk-linking Connections, same-type duplicate Merge, Convert of per-Connection passwords, and Delete (usage-aware confirmation `settings.savedCredentialDeleteUsed`). Legacy single-Connection passwords appear separately under `settings.perConnectionPasswords` with a Convert action that moves them into a Saved Credential.
 - `settings.credentialKindUrlPassword` — saved URL Connection passwords and captured non-secret input data. These records use the same one-row Edit/Delete controls and compact editor as Settings → URL.
 - `settings.credentialKindAiApiKey` — AI provider keys (stored under `AI_PROVIDER_SECRET_OWNER_ID`).
 - `settings.credentialKindEmailApiKey` / `settings.credentialKindEmailSmtpPassword` — Email tool credentials.

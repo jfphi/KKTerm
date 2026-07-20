@@ -1716,6 +1716,17 @@ pub struct ConnectionPasswordCredentialSummary {
     pub(crate) created_from_connection_id: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+    pub(crate) usage_count: i64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionPasswordCredentialUsage {
+    pub(crate) connection_id: String,
+    pub(crate) name: String,
+    pub(crate) connection_type: String,
+    pub(crate) host: String,
+    pub(crate) username: String,
 }
 
 pub(crate) const LEGACY_AI_PROVIDER_SECRET_OWNER_ID: &str = "openai-compatible-provider";
@@ -3395,10 +3406,12 @@ fn list_connection_password_credentials(
 ) -> Result<Vec<ConnectionPasswordCredentialSummary>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT id, connection_type, host, username, label, created_from_connection_id,
-                    created_at, updated_at
-             FROM connection_password_credentials
-             ORDER BY lower(connection_type), lower(host), lower(username), created_at",
+             "SELECT id, connection_type, host, username, label, created_from_connection_id,
+                     created_at, updated_at,
+                     (SELECT COUNT(*) FROM connections c
+                      WHERE c.password_credential_id = connection_password_credentials.id)
+              FROM connection_password_credentials
+              ORDER BY lower(connection_type), lower(host), lower(username), created_at",
         )
         .map_err(to_storage_error)?;
     let rows = statement
@@ -4171,6 +4184,7 @@ fn connection_password_credential_from_row(
         created_from_connection_id: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        usage_count: row.get(8)?,
     })
 }
 
@@ -4181,7 +4195,9 @@ fn get_connection_password_credential_by_id(
     connection
         .query_row(
             "SELECT id, connection_type, host, username, label, created_from_connection_id,
-                    created_at, updated_at
+                    created_at, updated_at,
+                    (SELECT COUNT(*) FROM connections c
+                     WHERE c.password_credential_id = connection_password_credentials.id)
              FROM connection_password_credentials
              WHERE id = ?1",
             params![credential_id],
@@ -4217,6 +4233,200 @@ fn connection_password_credential_label(username: &str, host: &str, ordinal: i64
     } else {
         format!("{base} #{ordinal}")
     }
+}
+
+fn list_connection_password_credential_usage(
+    connection: &SqliteConnection,
+    credential_id: &str,
+) -> Result<Vec<ConnectionPasswordCredentialUsage>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, name, connection_type, host, username
+             FROM connections
+             WHERE password_credential_id = ?1
+             ORDER BY lower(name)",
+        )
+        .map_err(to_storage_error)?;
+    let rows = statement
+        .query_map(params![credential_id], |row| {
+            Ok(ConnectionPasswordCredentialUsage {
+                connection_id: row.get(0)?,
+                name: row.get(1)?,
+                connection_type: row.get(2)?,
+                host: row.get(3)?,
+                username: row.get(4)?,
+            })
+        })
+        .map_err(to_storage_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(to_storage_error)
+}
+
+fn update_connection_password_credential(
+    connection: &SqliteConnection,
+    credential_id: &str,
+    label: Option<String>,
+    username: Option<String>,
+) -> Result<ConnectionPasswordCredentialSummary, String> {
+    let current = get_connection_password_credential_by_id(connection, credential_id)
+        .map_err(|_| "password credential was not found".to_string())?;
+    let label = match label {
+        Some(value) => {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                return Err("credential label is required".to_string());
+            }
+            trimmed
+        }
+        None => current.label,
+    };
+    let username = match username {
+        Some(value) => value.trim().to_string(),
+        None => current.username,
+    };
+    connection
+        .execute(
+            "UPDATE connection_password_credentials
+             SET label = ?2, username = ?3, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![credential_id, label, username],
+        )
+        .map_err(to_storage_error)?;
+    get_connection_password_credential_by_id(connection, credential_id)
+}
+
+fn create_standalone_connection_password_credential(
+    connection: &SqliteConnection,
+    connection_type: &str,
+    label: &str,
+    username: &str,
+    host: Option<&str>,
+) -> Result<ConnectionPasswordCredentialSummary, String> {
+    ensure_connection_password_type(connection_type)?;
+    let label = label.trim().to_string();
+    if label.is_empty() {
+        return Err("credential label is required".to_string());
+    }
+    let username = username.trim().to_string();
+    let host = host.unwrap_or("").trim().to_string();
+    let id = make_connection_password_credential_id();
+    connection
+        .execute(
+            "INSERT INTO connection_password_credentials
+                (id, connection_type, host, username, label, created_from_connection_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+            params![&id, connection_type, &host, &username, &label],
+        )
+        .map_err(to_storage_error)?;
+    get_connection_password_credential_by_id(connection, &id)
+}
+
+fn find_reusable_connection_password_credentials(
+    connection: &SqliteConnection,
+    connection_id: &str,
+) -> Result<Vec<ConnectionPasswordCredentialSummary>, String> {
+    let (connection_type, host, username) = connection
+        .query_row(
+            "SELECT connection_type, host, username FROM connections WHERE id = ?1",
+            params![connection_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(to_storage_error)?
+        .ok_or_else(|| "connection was not found".to_string())?;
+    ensure_connection_password_type(&connection_type)?;
+    let username = username.trim().to_string();
+    if username.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT id, connection_type, host, username, label, created_from_connection_id,
+                    created_at, updated_at,
+                    (SELECT COUNT(*) FROM connections c
+                     WHERE c.password_credential_id = connection_password_credentials.id)
+             FROM connection_password_credentials
+             WHERE connection_type = ?1 AND username = ?2
+             ORDER BY (host = ?3) DESC, created_at",
+        )
+        .map_err(to_storage_error)?;
+    let rows = statement
+        .query_map(
+            params![connection_type, username, host],
+            connection_password_credential_from_row,
+        )
+        .map_err(to_storage_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(to_storage_error)
+}
+
+fn merge_connection_password_credentials(
+    connection: &SqliteConnection,
+    target_credential_id: &str,
+    source_credential_ids: &[String],
+) -> Result<i64, String> {
+    let target = get_connection_password_credential_by_id(connection, target_credential_id)
+        .map_err(|_| "password credential was not found".to_string())?;
+    if source_credential_ids.is_empty() {
+        return Err("at least one credential to merge is required".to_string());
+    }
+    for source_id in source_credential_ids {
+        if source_id == target_credential_id {
+            return Err("a credential cannot be merged into itself".to_string());
+        }
+        let source = get_connection_password_credential_by_id(connection, source_id)
+            .map_err(|_| "password credential was not found".to_string())?;
+        if source.connection_type != target.connection_type {
+            return Err("password credential types must match to merge".to_string());
+        }
+    }
+    let placeholders = source_credential_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let relink_sql = format!(
+        "UPDATE connections SET password_credential_id = ?1 WHERE password_credential_id IN ({placeholders})"
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(target_credential_id.to_string())];
+    for source_id in source_credential_ids {
+        params.push(Box::new(source_id.clone()));
+    }
+    let relinked = connection
+        .execute(
+            &relink_sql,
+            rusqlite::params_from_iter(params.iter().map(|param| param.as_ref())),
+        )
+        .map_err(to_storage_error)?;
+    let delete_sql = format!(
+        "DELETE FROM connection_password_credentials WHERE id IN ({placeholders})"
+    );
+    connection
+        .execute(
+            &delete_sql,
+            rusqlite::params_from_iter(source_credential_ids.iter()),
+        )
+        .map_err(to_storage_error)?;
+    Ok(relinked as i64)
+}
+
+fn unassign_connection_password_credential(
+    connection: &SqliteConnection,
+    connection_id: &str,
+) -> Result<SavedConnection, String> {
+    connection
+        .execute(
+            "UPDATE connections SET password_credential_id = NULL WHERE id = ?1",
+            params![connection_id],
+        )
+        .map_err(to_storage_error)?;
+    get_connection_by_id(connection, connection_id)
 }
 
 fn ensure_connection_password_type(connection_type: &str) -> Result<(), String> {

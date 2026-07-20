@@ -30,7 +30,8 @@ import type {
   CredentialSettings,
   CredentialSecretStoreStatus,
   Connection,
-  ConnectionPasswordCredentialSummary,
+  ConnectionPasswordCredentialEntry,
+  ConnectionPasswordCredentialUsage,
   ConnectionFolder,
   ConnectionTree,
   CustomFont,
@@ -2153,14 +2154,68 @@ type CommandMap = {
   };
   list_connection_password_credentials: {
     args: undefined;
-    result: ConnectionPasswordCredentialSummary[];
+    result: ConnectionPasswordCredentialEntry[];
   };
   create_connection_password_credential: {
-    args: { request: { connectionId: string; secret: string } };
+    args: {
+      request: {
+        connectionId: string;
+        secret: string;
+        label?: string;
+        allowReuse?: boolean;
+      };
+    };
     result: Connection;
   };
   assign_connection_password_credential: {
     args: { request: { connectionId: string; credentialId: string } };
+    result: Connection;
+  };
+  update_connection_password_credential: {
+    args: {
+      request: {
+        credentialId: string;
+        label?: string;
+        username?: string;
+        secret?: string;
+      };
+    };
+    result: ConnectionPasswordCredentialEntry;
+  };
+  list_connection_password_credential_usage: {
+    args: { request: { credentialId: string } };
+    result: ConnectionPasswordCredentialUsage[];
+  };
+  create_standalone_connection_password_credential: {
+    args: {
+      request: {
+        connectionType: string;
+        label: string;
+        username: string;
+        host?: string;
+        secret: string;
+      };
+    };
+    result: ConnectionPasswordCredentialEntry;
+  };
+  convert_connection_password_to_credential: {
+    args: {
+      request: {
+        connectionId: string;
+        credentialId?: string;
+        label?: string;
+      };
+    };
+    result: Connection;
+  };
+  merge_connection_password_credentials: {
+    args: {
+      request: { targetCredentialId: string; sourceCredentialIds: string[] };
+    };
+    result: number;
+  };
+  unassign_connection_password_credential: {
+    args: { request: { connectionId: string } };
     result: Connection;
   };
   delete_stored_credential: {

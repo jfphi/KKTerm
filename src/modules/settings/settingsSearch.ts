@@ -78,6 +78,8 @@ export const SETTINGS_SEARCH_KEYS: Record<SettingsSectionId, readonly string[]> 
     "settings.credentialStorageSwitchNote", "settings.credentialsHint",
     "settings.credentialsTitle", "settings.deleteCredential",
     "settings.encryptedSecretStoreSetupAction", "settings.widgetCredentialsHint",
+    "settings.savedCredentials", "settings.savedCredentialNew",
+    "settings.perConnectionPasswords",
   ],
   "assistant-settings": [
     "settings.aiProviderConnection", "settings.provider", "settings.model",

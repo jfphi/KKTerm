@@ -58,10 +58,12 @@ export function PasswordField({
 export function PasswordCredentialSelect({
   credentials,
   selectedCredentialId,
+  includeTypeNewOption = true,
   onChange,
 }: {
   credentials: StoredCredentialSummary[];
   selectedCredentialId: string;
+  includeTypeNewOption?: boolean;
   onChange: (credentialId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -76,10 +78,10 @@ export function PasswordCredentialSelect({
         onChange={(event) => onChange(event.currentTarget.value)}
         value={selectedCredentialId}
       >
-        <option value="">{t("connections.typeNewPassword")}</option>
+        {includeTypeNewOption ? <option value="">{t("connections.typeNewPassword")}</option> : null}
         {credentials.map((credential) => (
           <option key={credential.ownerId} value={credential.ownerId}>
-            {passwordCredentialOptionLabel(credential)}
+            {credential.label}
           </option>
         ))}
       </select>
@@ -87,9 +89,84 @@ export function PasswordCredentialSelect({
   );
 }
 
-function passwordCredentialOptionLabel(credential: StoredCredentialSummary) {
-  const user = credential.username?.trim() || "-";
-  const host = credential.host?.trim() || credential.detail || credential.ownerId;
-  const suffix = credential.label.match(/\s(#[0-9]+)$/)?.[1] ?? "";
-  return `${user} @ ${host}${suffix ? ` ${suffix}` : ""}`;
+export type PasswordEntryMode = "new" | "saved";
+
+/**
+ * Explicit password source choice: type a new password or link a saved
+ * credential. Only the active field is rendered, so the form never carries
+ * both a typed password and a credential id (which previously discarded the
+ * selection silently and minted duplicate credentials).
+ */
+export function PasswordCredentialModeFields({
+  credentials,
+  defaultMode,
+  hasStoredSecret,
+  label,
+  placeholder,
+  selectedCredentialId,
+  onSelectedCredentialIdChange,
+}: {
+  credentials: StoredCredentialSummary[];
+  defaultMode: PasswordEntryMode;
+  hasStoredSecret: boolean;
+  label: string;
+  placeholder: string;
+  selectedCredentialId: string;
+  onSelectedCredentialIdChange: (credentialId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<PasswordEntryMode>(defaultMode);
+
+  if (credentials.length === 0) {
+    return (
+      <PasswordField
+        hasStoredSecret={hasStoredSecret}
+        label={label}
+        name="password"
+        placeholder={placeholder}
+      />
+    );
+  }
+
+  const effectiveSelection = credentials.some(
+    (credential) => credential.ownerId === selectedCredentialId,
+  )
+    ? selectedCredentialId
+    : credentials[0].ownerId;
+
+  return (
+    <>
+      <div className="password-credential-mode" role="group" aria-label={t("connections.savedPassword")}>
+        <button
+          className={mode === "new" ? "active" : ""}
+          type="button"
+          onClick={() => setMode("new")}
+        >
+          {t("connections.enterNewPassword")}
+        </button>
+        <button
+          className={mode === "saved" ? "active" : ""}
+          type="button"
+          onClick={() => setMode("saved")}
+        >
+          {t("connections.useSavedCredential")}
+        </button>
+      </div>
+      {mode === "saved" ? (
+        <PasswordCredentialSelect
+          credentials={credentials}
+          includeTypeNewOption={false}
+          onChange={onSelectedCredentialIdChange}
+          selectedCredentialId={effectiveSelection}
+        />
+      ) : (
+        <PasswordField
+          hasStoredSecret={hasStoredSecret}
+          label={label}
+          name="password"
+          placeholder={placeholder}
+        />
+      )}
+    </>
+  );
 }

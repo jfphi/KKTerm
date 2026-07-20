@@ -45,6 +45,10 @@ _Avoid_: Web tab, browser bookmark, URL profile
 A Connection of kind `rdp` or `vnc`. It stores host, optional port, and non-secret account metadata in SQLite; passwords stay in the OS keychain. RDP Connections start Windows-native remote desktop Sessions through the Microsoft RDP ActiveX control in `mstscax.dll`. VNC Connections start RFB/VNC Sessions through the Rust `vnc-rs` client and render the remote framebuffer in the workspace canvas.
 _Avoid_: Remote desktop session, screen profile, saved desktop
 
+**Saved Credential**:
+A durable, reusable login bundle: a user-editable label plus a username and a password. Non-secret metadata (label, Connection type, host reference, username) lives in SQLite (`connection_password_credentials`); the password bytes live only in the configured secret store under the credential id. SSH, Telnet, RDP, VNC, and FTP Connections link to one Saved Credential via `password_credential_id`; many Connections may share the same one, and updating its password once applies to every linked Connection on next open. Saved Credentials are created and managed in Settings → Credentials (rename, password update, usage list, link/unlink, merge) and in the Connection dialog, which makes an explicit choice between "Use a saved credential" and entering a new password. A legacy per-Connection password — a secret stored under the Connection's own id with no credential metadata — remains valid and can be converted into a Saved Credential from Settings → Credentials.
+_Avoid_: Identity, profile, account, keychain entry
+
 **Quick Connect**:
 A fast path to start a Session that persists a saved Connection. Quick Connect reuses an identical existing SSH Connection (matched by host/user/port) or creates one, then opens it — so every Quick Connect target becomes a durable Connection. The sole non-persisted case is an elevated admin shell launched while KKTerm itself is not elevated: that opens an external UAC process with no in-app Session.
 _Avoid_: Temporary profile, ad hoc host, one-off session
