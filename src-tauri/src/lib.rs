@@ -154,6 +154,8 @@ struct DeleteStoredCredentialRequest {
 struct CreateConnectionPasswordCredentialRequest {
     connection_id: String,
     secret: String,
+    label: Option<String>,
+    allow_reuse: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +163,61 @@ struct CreateConnectionPasswordCredentialRequest {
 struct AssignConnectionPasswordCredentialRequest {
     connection_id: String,
     credential_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateConnectionPasswordCredentialRequest {
+    credential_id: String,
+    label: Option<String>,
+    username: Option<String>,
+    host: Option<String>,
+    secret: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionPasswordCredentialUsageRequest {
+    credential_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateStandaloneConnectionPasswordCredentialRequest {
+    connection_type: String,
+    label: String,
+    username: String,
+    host: Option<String>,
+    secret: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvertConnectionPasswordToCredentialRequest {
+    connection_id: String,
+    credential_id: Option<String>,
+    label: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeConnectionPasswordCredentialsRequest {
+    target_credential_id: String,
+    source_credential_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnassignConnectionPasswordCredentialRequest {
+    connection_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionPasswordCredentialEntry {
+    #[serde(flatten)]
+    summary: storage::ConnectionPasswordCredentialSummary,
+    secret_exists: bool,
 }
 
 #[derive(Deserialize)]
@@ -2195,20 +2252,21 @@ fn list_stored_credentials(
 fn list_connection_password_credentials(
     storage: tauri::State<'_, storage::Storage>,
     secrets: tauri::State<'_, secrets::Secrets>,
-) -> Result<Vec<storage::ConnectionPasswordCredentialSummary>, String> {
+) -> Result<Vec<ConnectionPasswordCredentialEntry>, String> {
     let credentials = storage.list_connection_password_credentials()?;
-    let mut existing_credentials = Vec::new();
+    let mut entries = Vec::new();
     for credential in credentials {
-        let exists = secrets
+        let secret_exists = secrets
             .secret_exists(secrets::SecretReferenceRequest::connection_password(
                 credential.id.clone(),
             ))?
             .exists();
-        if exists {
-            existing_credentials.push(credential);
-        }
+        entries.push(ConnectionPasswordCredentialEntry {
+            summary: credential,
+            secret_exists,
+        });
     }
-    Ok(existing_credentials)
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -2221,8 +2279,21 @@ fn create_connection_password_credential(
     if secret.is_empty() {
         return Err("secret value is required".to_string());
     }
-    let credential =
-        storage.create_connection_password_credential_metadata(request.connection_id.clone())?;
+    if request.allow_reuse.unwrap_or(false) {
+        let candidates = storage
+            .find_reusable_connection_password_credentials(request.connection_id.clone())?;
+        for candidate in candidates {
+            let existing = secrets.read_connection_password(candidate.id.clone())?;
+            if existing.as_deref() == Some(secret.as_str()) {
+                return storage.assign_connection_password_credential(
+                    request.connection_id,
+                    candidate.id,
+                );
+            }
+        }
+    }
+    let credential = storage
+        .create_connection_password_credential_metadata(request.connection_id.clone(), request.label)?;
     if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
         credential.id.clone(),
         secret,
@@ -2242,6 +2313,179 @@ fn create_connection_password_credential(
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+fn update_connection_password_credential(
+    storage: tauri::State<'_, storage::Storage>,
+    secrets: tauri::State<'_, secrets::Secrets>,
+    request: UpdateConnectionPasswordCredentialRequest,
+) -> Result<ConnectionPasswordCredentialEntry, String> {
+    let credential = storage.update_connection_password_credential(
+        request.credential_id.clone(),
+        request.label,
+        request.username,
+        request.host,
+    )?;
+    if let Some(secret) = request.secret {
+        if !secret.is_empty() {
+            secrets.store_secret(secrets::StoreSecretRequest::connection_password(
+                credential.id.clone(),
+                secret,
+            ))?;
+        }
+    }
+    let secret_exists = secrets
+        .secret_exists(secrets::SecretReferenceRequest::connection_password(
+            credential.id.clone(),
+        ))?
+        .exists();
+    Ok(ConnectionPasswordCredentialEntry {
+        summary: credential,
+        secret_exists,
+    })
+}
+
+#[tauri::command]
+fn list_connection_password_credential_usage(
+    storage: tauri::State<'_, storage::Storage>,
+    request: ConnectionPasswordCredentialUsageRequest,
+) -> Result<Vec<storage::ConnectionPasswordCredentialUsage>, String> {
+    storage.list_connection_password_credential_usage(request.credential_id)
+}
+
+#[tauri::command]
+fn create_standalone_connection_password_credential(
+    storage: tauri::State<'_, storage::Storage>,
+    secrets: tauri::State<'_, secrets::Secrets>,
+    request: CreateStandaloneConnectionPasswordCredentialRequest,
+) -> Result<ConnectionPasswordCredentialEntry, String> {
+    if request.secret.is_empty() {
+        return Err("secret value is required".to_string());
+    }
+    let credential = storage.create_standalone_connection_password_credential(
+        request.connection_type,
+        request.label,
+        request.username,
+        request.host,
+    )?;
+    if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
+        credential.id.clone(),
+        request.secret,
+    )) {
+        let _ = storage.delete_connection_password_credential_metadata(credential.id);
+        return Err(error);
+    }
+    Ok(ConnectionPasswordCredentialEntry {
+        summary: credential,
+        secret_exists: true,
+    })
+}
+
+#[tauri::command]
+fn convert_connection_password_to_credential(
+    storage: tauri::State<'_, storage::Storage>,
+    secrets: tauri::State<'_, secrets::Secrets>,
+    request: ConvertConnectionPasswordToCredentialRequest,
+) -> Result<storage::SavedConnection, String> {
+    if let Some(credential_id) = request.credential_id {
+        let presence = secrets.secret_exists(
+            secrets::SecretReferenceRequest::connection_password(credential_id.clone()),
+        )?;
+        if !presence.exists() {
+            return Err("stored password was not found".to_string());
+        }
+        let connection = storage.assign_connection_password_credential(
+            request.connection_id.clone(),
+            credential_id,
+        )?;
+        if secrets
+            .read_connection_password(request.connection_id.clone())?
+            .is_some()
+        {
+            secrets.delete_secret(secrets::SecretReferenceRequest::connection_password(
+                request.connection_id,
+            ))?;
+        }
+        return Ok(connection);
+    }
+    let legacy_secret = secrets
+        .read_connection_password(request.connection_id.clone())?
+        .ok_or_else(|| "no stored password was found for this connection".to_string())?;
+    let credential = storage
+        .create_connection_password_credential_metadata(request.connection_id.clone(), request.label)?;
+    if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
+        credential.id.clone(),
+        legacy_secret,
+    )) {
+        let _ = storage.delete_connection_password_credential_metadata(credential.id);
+        return Err(error);
+    }
+    match storage
+        .assign_connection_password_credential(request.connection_id.clone(), credential.id.clone())
+    {
+        Ok(connection) => {
+            let _ = secrets.delete_secret(secrets::SecretReferenceRequest::connection_password(
+                request.connection_id,
+            ));
+            Ok(connection)
+        }
+        Err(error) => {
+            let _ = secrets.delete_secret(secrets::SecretReferenceRequest::connection_password(
+                credential.id.clone(),
+            ));
+            let _ = storage.delete_connection_password_credential_metadata(credential.id);
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+fn merge_connection_password_credentials(
+    storage: tauri::State<'_, storage::Storage>,
+    secrets: tauri::State<'_, secrets::Secrets>,
+    request: MergeConnectionPasswordCredentialsRequest,
+) -> Result<i64, String> {
+    let target_has_secret = secrets
+        .secret_exists(secrets::SecretReferenceRequest::connection_password(
+            request.target_credential_id.clone(),
+        ))?
+        .exists();
+    if !target_has_secret {
+        for source_id in &request.source_credential_ids {
+            let source_has_secret = secrets
+                .secret_exists(secrets::SecretReferenceRequest::connection_password(
+                    source_id.clone(),
+                ))?
+                .exists();
+            if source_has_secret {
+                return Err(
+                    "the kept credential has no stored password; keep one whose password is stored"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    let relinked = storage.merge_connection_password_credentials(
+        request.target_credential_id,
+        request.source_credential_ids.clone(),
+    )?;
+    // Best effort: the merge itself already succeeded, and a failed secret
+    // cleanup must not report it as failed (retrying would hit missing rows).
+    for source_id in request.source_credential_ids {
+        let _ = secrets.delete_secret(secrets::SecretReferenceRequest::connection_password(
+            source_id,
+        ));
+    }
+    Ok(relinked)
+}
+
+#[tauri::command]
+fn unassign_connection_password_credential(
+    storage: tauri::State<'_, storage::Storage>,
+    request: UnassignConnectionPasswordCredentialRequest,
+) -> Result<storage::SavedConnection, String> {
+    storage.unassign_connection_password_credential(request.connection_id)
 }
 
 #[tauri::command]
@@ -4429,6 +4673,12 @@ pub fn run() {
             list_connection_password_credentials,
             create_connection_password_credential,
             assign_connection_password_credential,
+            update_connection_password_credential,
+            list_connection_password_credential_usage,
+            create_standalone_connection_password_credential,
+            convert_connection_password_to_credential,
+            merge_connection_password_credentials,
+            unassign_connection_password_credential,
             delete_stored_credential,
             // ── Terminal sessions & recordings
             start_terminal_session,
