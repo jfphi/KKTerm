@@ -1185,11 +1185,13 @@ export interface FtpConnectionOptions {
 }
 
 export type ScreenshotFormat = "png" | "jpeg";
+export type ScreenshotCaptureDelivery = "folder" | "clipboard" | "both";
 
 export interface ScreenshotSettings {
   folderPath: string;
   format: ScreenshotFormat;
-  jpegQuality: number;
+  quality: number;
+  captureMode: ScreenshotCaptureDelivery;
   regionShortcut: string;
   regionShortcutEnabled: boolean;
   windowShortcut: string;

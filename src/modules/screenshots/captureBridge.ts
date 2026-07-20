@@ -1,6 +1,6 @@
 // Shared capture entry point for the Screenshots Module. The header buttons,
 // the tray capture items, and the global capture hotkeys all end up in
-// `performLibraryCapture`, so every path gets the same Status Bar notices and
+// `performScreenshotCapture`, so every path gets the same Status Bar notices and
 // library refresh. Tray/hotkey requests arrive as a backend event because the
 // webview keeps running while the window is hidden to the tray.
 import { useEffect, useRef } from "react";
@@ -20,7 +20,7 @@ function isCaptureMode(value: unknown): value is ScreenshotCaptureMode {
   return value === "region" || value === "window" || value === "fullscreen";
 }
 
-export async function performLibraryCapture(mode: ScreenshotCaptureMode, t: TFunction) {
+export async function performScreenshotCapture(mode: ScreenshotCaptureMode, t: TFunction) {
   const notify = useWorkspaceStore.getState().showStatusBarNotice;
   if (!isTauriRuntime()) {
     notify(t("screenshots.requiresRuntime"), { tone: "warning" });
@@ -31,7 +31,7 @@ export async function performLibraryCapture(mode: ScreenshotCaptureMode, t: TFun
   }
   useScreenshotsStore.getState().setCaptureInFlight(true);
   try {
-    const screenshot =
+    const result =
       mode === "region"
         ? await invokeCommand("capture_interactive_region_screenshot_to_library", {
             kind: "region",
@@ -43,8 +43,15 @@ export async function performLibraryCapture(mode: ScreenshotCaptureMode, t: TFun
           : await invokeCommand("capture_fullscreen_screenshot_to_library", {
               kind: "fullscreen",
             });
-    useScreenshotsStore.getState().prepend(screenshot);
-    notify(t("screenshots.captureSaved", { name: screenshot.fileName }), {
+    if (result.storedScreenshot) {
+      useScreenshotsStore.getState().prepend(result.storedScreenshot);
+    }
+    const message = result.storedScreenshot && result.copiedToClipboard
+      ? t("screenshots.captureSavedAndCopied", { name: result.storedScreenshot.fileName })
+      : result.storedScreenshot
+        ? t("screenshots.captureSaved", { name: result.storedScreenshot.fileName })
+        : t("screenshots.captureCopied");
+    notify(message, {
       tone: "success",
     });
   } catch (error) {
@@ -70,7 +77,7 @@ export function useScreenshotCaptureBridge() {
     }
     const unlisten = listen<string>(CAPTURE_EVENT, (event) => {
       if (isCaptureMode(event.payload)) {
-        void performLibraryCapture(event.payload, tRef.current);
+        void performScreenshotCapture(event.payload, tRef.current);
       }
     });
     return () => {

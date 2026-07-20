@@ -48,6 +48,13 @@ pub struct StoredScreenshot {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ScreenshotCaptureResult {
+    stored_screenshot: Option<StoredScreenshot>,
+    copied_to_clipboard: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FullScreenshot {
     id: String,
     file_name: String,
@@ -62,7 +69,8 @@ pub struct FullScreenshot {
 pub struct LibrarySaveOptions {
     pub folder_path: String,
     pub format: String,
-    pub jpeg_quality: u8,
+    pub quality: u8,
+    pub capture_mode: String,
 }
 
 #[derive(Deserialize)]
@@ -169,7 +177,7 @@ pub fn capture_rect_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     let target = capture_target(app, request)?;
     let dib = platform::capture_screen_rect_to_dib(
         target.x,
@@ -178,7 +186,8 @@ pub fn capture_rect_to_library(
         target.height,
         use_directx,
     )?;
-    save_dib_to_library(
+    deliver_dib(
+        app,
         &dib,
         target.width as u32,
         target.height as u32,
@@ -193,7 +202,7 @@ pub fn capture_fullscreen_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     let _guard = MinimizedCaptureWindow::new(app)?;
     let target = platform::virtual_screen_rect();
     let dib = platform::capture_screen_rect_to_dib(
@@ -203,7 +212,8 @@ pub fn capture_fullscreen_to_library(
         target.height,
         use_directx,
     )?;
-    save_dib_to_library(
+    deliver_dib(
+        app,
         &dib,
         target.width as u32,
         target.height as u32,
@@ -218,7 +228,7 @@ pub fn capture_active_window_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     let _guard = MinimizedCaptureWindow::new(app)?;
     let screen = platform::virtual_screen_rect();
     let screen_dib = platform::capture_screen_rect_to_dib(
@@ -232,7 +242,8 @@ pub fn capture_active_window_to_library(
     let target = platform::select_window_rect(&screen_dib, &screen, windows)?
         .ok_or_else(|| "screenshot capture canceled".to_string())?;
     let dib = platform::crop_dib(&screen_dib, screen.width, screen.height, &screen, &target)?;
-    save_dib_to_library(
+    deliver_dib(
+        app,
         &dib,
         target.width as u32,
         target.height as u32,
@@ -247,7 +258,7 @@ pub fn capture_interactive_region_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     let _guard = MinimizedCaptureWindow::new(app)?;
     let screen = platform::virtual_screen_rect();
     let screen_dib = platform::capture_screen_rect_to_dib(
@@ -260,7 +271,8 @@ pub fn capture_interactive_region_to_library(
     let target = platform::select_region_rect(&screen_dib, &screen)?
         .ok_or_else(|| "screenshot capture canceled".to_string())?;
     let dib = platform::crop_dib(&screen_dib, screen.width, screen.height, &screen, &target)?;
-    save_dib_to_library(
+    deliver_dib(
+        app,
         &dib,
         target.width as u32,
         target.height as u32,
@@ -414,7 +426,7 @@ pub fn capture_rect_to_library(
     _kind: String,
     _options: LibrarySaveOptions,
     _use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     Err("screenshot capture is currently available on Windows".to_string())
 }
 
@@ -424,7 +436,7 @@ pub fn capture_fullscreen_to_library(
     _kind: String,
     _options: LibrarySaveOptions,
     _use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     Err("screenshot capture is currently available on Windows".to_string())
 }
 
@@ -434,7 +446,7 @@ pub fn capture_active_window_to_library(
     _kind: String,
     _options: LibrarySaveOptions,
     _use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     Err("screenshot capture is currently available on Windows".to_string())
 }
 
@@ -444,7 +456,7 @@ pub fn capture_interactive_region_to_library(
     _kind: String,
     _options: LibrarySaveOptions,
     _use_directx: bool,
-) -> Result<StoredScreenshot, String> {
+) -> Result<ScreenshotCaptureResult, String> {
     Err("screenshot capture is currently available on Windows".to_string())
 }
 
@@ -875,11 +887,14 @@ fn save_dib_to_library(
     let folder = ensure_screenshots_folder(&options.folder_path)?;
     let (bytes, extension) = if options.format == "jpeg" {
         (
-            platform::dib_to_jpeg_bytes_with_quality(dib, width, height, options.jpeg_quality)?,
+            platform::dib_to_jpeg_bytes_with_quality(dib, width, height, options.quality)?,
             "jpg",
         )
     } else {
-        (platform::dib_to_png_bytes(dib, width, height)?, "png")
+        (
+            platform::dib_to_png_bytes_with_quality(dib, width, height, options.quality)?,
+            "png",
+        )
     };
     let captured_at = now_millis();
     let normalized_kind = normalize_kind(&kind);
@@ -887,6 +902,40 @@ fn save_dib_to_library(
     let path = folder.join(file_name);
     fs::write(&path, bytes).map_err(|error| format!("failed to save screenshot: {error}"))?;
     stored_screenshot_from_path(&folder, path)
+}
+
+#[cfg(target_os = "windows")]
+fn deliver_dib(
+    app: &tauri::AppHandle,
+    dib: &[u8],
+    width: u32,
+    height: u32,
+    kind: String,
+    options: &LibrarySaveOptions,
+) -> Result<ScreenshotCaptureResult, String> {
+    let copy_to_clipboard = options.capture_mode != "folder";
+    let save_to_folder = options.capture_mode != "clipboard";
+
+    if copy_to_clipboard {
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "main window is not available".to_string())?;
+        let hwnd = window
+            .hwnd()
+            .map_err(|error| format!("failed to resolve window handle: {error}"))?;
+        platform::copy_dib_to_clipboard(hwnd.0, dib)?;
+    }
+
+    let stored_screenshot = if save_to_folder {
+        Some(save_dib_to_library(dib, width, height, kind, options)?)
+    } else {
+        None
+    };
+
+    Ok(ScreenshotCaptureResult {
+        stored_screenshot,
+        copied_to_clipboard: copy_to_clipboard,
+    })
 }
 
 fn ensure_screenshots_folder(folder_path: &str) -> Result<PathBuf, String> {
@@ -1249,7 +1298,11 @@ mod platform {
         use_directx: bool,
     ) -> Result<(), String> {
         let dib = capture_screen_rect_to_dib(x, y, width, height, use_directx)?;
-        unsafe { write_dib_to_clipboard(owner_hwnd, &dib) }
+        copy_dib_to_clipboard(owner_hwnd, &dib)
+    }
+
+    pub fn copy_dib_to_clipboard(owner_hwnd: HWND, dib: &[u8]) -> Result<(), String> {
+        unsafe { write_dib_to_clipboard(owner_hwnd, dib) }
     }
 
     pub fn write_rgba_to_clipboard(
@@ -1978,12 +2031,22 @@ mod platform {
         Ok(jpeg)
     }
 
-    pub fn dib_to_png_bytes(dib: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
-        use image::codecs::png::PngEncoder;
+    pub fn dib_to_png_bytes_with_quality(
+        dib: &[u8],
+        width: u32,
+        height: u32,
+        quality: u8,
+    ) -> Result<Vec<u8>, String> {
+        use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 
         let rgb = dib_to_rgb(dib, width, height)?;
         let mut png = Vec::new();
-        PngEncoder::new(&mut png)
+        let compression_level = 1 + ((quality.clamp(1, 100) as u16 - 1) * 8 / 99) as u8;
+        PngEncoder::new_with_quality(
+            &mut png,
+            CompressionType::Level(compression_level),
+            FilterType::Adaptive,
+        )
             .write_image(&rgb, width, height, ColorType::Rgb8.into())
             .map_err(|error| format!("failed to encode PNG: {error}"))?;
         Ok(png)

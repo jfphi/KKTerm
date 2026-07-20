@@ -1831,7 +1831,8 @@ fn screenshot_library_context(
         screenshot::LibrarySaveOptions {
             folder_path: settings.folder_path().to_string(),
             format: settings.format().to_string(),
-            jpeg_quality: settings.jpeg_quality(),
+            quality: settings.quality(),
+            capture_mode: settings.capture_mode().to_string(),
         },
         general_settings.use_directx_screen_capture(),
     ))
@@ -1842,7 +1843,7 @@ async fn capture_screenshot_to_library(
     app: tauri::AppHandle,
     request: screenshot::CaptureScreenshotRequest,
     kind: String,
-) -> Result<screenshot::StoredScreenshot, String> {
+) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
         screenshot::capture_rect_to_library(&app, request, kind, options, use_directx)
@@ -1854,7 +1855,7 @@ async fn capture_screenshot_to_library(
 async fn capture_fullscreen_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
-) -> Result<screenshot::StoredScreenshot, String> {
+) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("fullscreen screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
         screenshot::capture_fullscreen_to_library(&app, kind, options, use_directx)
@@ -1866,7 +1867,7 @@ async fn capture_fullscreen_screenshot_to_library(
 async fn capture_active_window_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
-) -> Result<screenshot::StoredScreenshot, String> {
+) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("active-window screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
         screenshot::capture_active_window_to_library(&app, kind, options, use_directx)
@@ -1878,7 +1879,7 @@ async fn capture_active_window_screenshot_to_library(
 async fn capture_interactive_region_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
-) -> Result<screenshot::StoredScreenshot, String> {
+) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("interactive screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
         screenshot::capture_interactive_region_to_library(&app, kind, options, use_directx)

@@ -127,7 +127,7 @@ Buttons in the Module header (and mirrored in tray + hotkeys):
   - Window: `Ctrl+Alt+W`
   - Fullscreen: `Ctrl+Alt+F`
 - Shortcuts are registered at startup from settings, re-registered on change,
-  with per-shortcut enable toggles and conflict errors surfaced in Settings.
+  with per-row clear actions and conflict errors surfaced in Settings.
   Handlers share the tray code path (work while hidden to tray).
 
 ### Settings
@@ -135,15 +135,17 @@ Buttons in the Module header (and mirrored in tray + hotkeys):
 New **Settings → Screenshots** section (Settings Sidebar entry):
 
 - Library folder (existing `folderPath`, folder picker via dialog plugin).
-- Image format: **PNG (default)** or JPEG with a quality slider. Stored in
+- Capture Mode: Save to folder, Clipboard, or Both (default). The same captured
+  DIB is delivered to each selected destination; clipboard-only leaves no file.
+- Image format: **PNG (default)** or JPEG with an always-visible quality slider. Stored in
   `ScreenshotSettings` as optional serde-defaulted fields (no SQLite schema
-  migration — screenshot settings are settings-storage JSON). Existing JPEG
-  files keep listing/opening normally; the format only affects new captures.
-- After-capture behavior checkboxes: Save to library (always on in v1),
-  Copy to clipboard, Open viewer.
-- Global shortcut editors + enable toggles.
-- The existing DirectX capture toggle stays in General (it is shared with the
-  assistant capture path); the Screenshots section links to it.
+  migration — screenshot settings are settings-storage JSON). JPEG interprets
+  the value as lossy quality; PNG stays lossless and maps it to compression
+  effort. Existing files keep listing/opening normally.
+- Global shortcut editors appear in both Screenshots and Shortcuts through one
+  shared draft. Clearing a row disables it; entering a binding enables it.
+- The DirectX capture toggle is shown in Screenshots (it remains in General
+  settings storage so the assistant capture path continues sharing the value).
 
 ## Backend work items
 
@@ -157,10 +159,11 @@ New **Settings → Screenshots** section (Settings Sidebar entry):
    excluded from listing. (Asset-protocol serving was considered, but its
    scope is static config while the library folder is user-configurable, so
    data-URL thumbnails through commands are the robust path.)
-2. **PNG format + quality.** Extend `save_dib_to_library` and
-   `ScreenshotSettings` (`format: "png" | "jpeg"`, serde default `png`;
-   `jpegQuality` used only for JPEG). `image` already has the `png` feature
-   enabled. File naming becomes `KKTerm-<kind>-<millis>.<ext>`.
+2. **PNG/JPEG format + quality.** `save_dib_to_library` reads
+   `ScreenshotSettings.format` (`"png" | "jpeg"`, serde default `png`) and
+   the shared `quality` value. Legacy `jpegQuality` JSON is accepted as an
+   alias. JPEG uses lossy quality; PNG maps 1–100 to lossless compression
+   effort. File names use `KKTerm-<kind>-<millis>.<ext>`.
 3. **`rename_screenshot(id, new_name)`** with the same traversal guards as
    `screenshot_path_from_id`.
 4. **Copy stored screenshot to clipboard** — `copy_screenshot_to_clipboard(id)`

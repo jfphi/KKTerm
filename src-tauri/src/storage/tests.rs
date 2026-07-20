@@ -1,6 +1,30 @@
 use super::*;
 use rusqlite::params;
 
+#[test]
+fn screenshot_settings_upgrade_legacy_jpeg_quality_and_default_to_both() {
+    let settings: ScreenshotSettings = serde_json::from_str(
+        r#"{
+            "folderPath": "C:\\\\Screenshots",
+            "format": "jpeg",
+            "jpegQuality": 74,
+            "regionShortcut": "Ctrl+Alt+R",
+            "regionShortcutEnabled": true,
+            "windowShortcut": "Ctrl+Alt+W",
+            "windowShortcutEnabled": true,
+            "fullscreenShortcut": "Ctrl+Alt+F",
+            "fullscreenShortcutEnabled": true
+        }"#,
+    )
+    .expect("legacy screenshot settings should deserialize");
+
+    assert_eq!(settings.quality(), 74);
+    assert_eq!(settings.capture_mode(), "both");
+    let serialized = serde_json::to_value(settings).expect("serialize screenshot settings");
+    assert_eq!(serialized["quality"], 74);
+    assert!(serialized.get("jpegQuality").is_none());
+}
+
 fn find_folder<'a>(
     folders: &'a [ConnectionFolder],
     folder_id: &str,

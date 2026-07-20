@@ -16,6 +16,9 @@ test("portable creator is an installed-Windows Settings action", async () => {
 
   assert.match(general, /windowsPlatform\s*&&\s*!portableMode/);
   assert.match(general, /settings\.portableCreatorAction/);
+  const portableSection = general.indexOf('settings.portableInstallSection');
+  const debugSection = general.indexOf('data-tutorial-id="settings.debug"');
+  assert.ok(portableSection > -1 && portableSection < debugSection);
   assert.match(dialog, /invokeCommand\("create_portable_copy"/);
   assert.match(dialog, /settings\.portableCreatorCredentialsExcluded/);
   assert.doesNotMatch(

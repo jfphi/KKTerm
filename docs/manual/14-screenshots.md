@@ -2,22 +2,22 @@
 
 ## AI grep hints
 
-- Keys: `screenshots.title`, `screenshots.railLabel`, `screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`, `screenshots.view.thumbnails`, `screenshots.view.list`, `screenshots.view.details`, `screenshots.openFolder`, `screenshots.clearAll`, `screenshots.menu.openExternal`, `screenshots.menu.copy`, `screenshots.menu.reveal`, `screenshots.menu.rename`, `screenshots.captureSaved`, `screenshots.emptyTitle`, `settings.sectionScreenshots`, `settings.screenshotsFolder`, `settings.screenshotsFormat`, `settings.screenshotsShortcuts`, `workspace.takeScreenshot`, `workspace.copyRegion`, `workspace.copyEntirePanel`, `workspace.sendRegionToAi`, `workspace.sendEntirePanelToAi`, `workspace.sentToAi`, `workspace.copied`, `workspace.selectRegion`, `workspace.screenshot`, `workspace.screenshotsRequireRuntime`, `workspace.screenshotCaptureError`, `sftp.screenshotTarget`, `webview.screenshotTarget`
+- Keys: `screenshots.title`, `screenshots.railLabel`, `screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`, `screenshots.view.thumbnails`, `screenshots.view.list`, `screenshots.view.details`, `screenshots.openFolder`, `screenshots.clearAll`, `screenshots.menu.openExternal`, `screenshots.menu.copy`, `screenshots.menu.reveal`, `screenshots.menu.rename`, `screenshots.captureSaved`, `screenshots.captureCopied`, `screenshots.captureSavedAndCopied`, `screenshots.emptyTitle`, `settings.sectionScreenshots`, `settings.screenshotsFolder`, `settings.screenshotsCaptureMode`, `settings.screenshotsFormat`, `settings.screenshotsQuality`, `settings.screenshotsShortcuts`, `settings.useDirectxScreenCapture`, `workspace.takeScreenshot`, `workspace.copyRegion`, `workspace.copyEntirePanel`, `workspace.sendRegionToAi`, `workspace.sendEntirePanelToAi`, `workspace.sentToAi`, `workspace.copied`, `workspace.selectRegion`, `workspace.screenshot`, `workspace.screenshotsRequireRuntime`, `workspace.screenshotCaptureError`, `sftp.screenshotTarget`, `webview.screenshotTarget`
 - Topics: Screenshots Module, screenshot library, capture region / window / fullscreen, thumbnails / list / details views, tray capture menu, global capture shortcuts, hotkeys, PNG / JPEG format, screenshots folder, rename / delete / copy screenshot, send to AI, copy to clipboard
-- Tutorial targets: `app.activityRailScreenshots`, `screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`, `screenshots.viewSwitch`, `screenshots.library`, `settings.screenshotsFolder`, `settings.screenshotsFormat`, `settings.screenshotsShortcuts`, `workspace.screenshotMenu`
+- Tutorial targets: `app.activityRailScreenshots`, `screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`, `screenshots.viewSwitch`, `screenshots.library`, `settings.screenshotsFolder`, `settings.screenshotsFormat`, `settings.screenshotsShortcuts`, `settings.useDirectxScreenCapture`, `workspace.screenshotMenu`
 - Synonyms: "snip", "grab", "screen capture", "screenshot gallery", "print screen", "snipping tool", "ShareX", "send to AI"
 
 ## The Screenshots Module
 
 The **Screenshots Module** is an Activity Rail destination (`screenshots.railLabel`, tutorial target `app.activityRailScreenshots`) that captures screenshots into a library folder and lists them newest-first. Settings → General → `settings.activityRail` controls whether the Module appears; it is visible by default.
 
-Capture actions live in the Module header and save into the configured library folder (Windows captures; other platforms currently show the library read-only):
+Capture actions live in the Module header and follow `settings.screenshotsCaptureMode` (Windows captures; other platforms currently show the library read-only):
 
 - `screenshots.captureRegion` (tutorial target `screenshots.captureRegion`) — native full-desktop overlay; drag to select a rectangle, Esc cancels.
 - `screenshots.captureWindow` (tutorial target `screenshots.captureWindow`) — native overlay that highlights the window under the pointer; click to capture, Esc cancels.
 - `screenshots.captureFullscreen` (tutorial target `screenshots.captureFullscreen`) — captures the entire virtual desktop across all monitors.
 
-The KKTerm window minimizes out of the way during a capture and restores afterwards. Every successful capture shows `screenshots.captureSaved` in the Status Bar and prepends the new item to the library.
+The KKTerm window minimizes out of the way during a capture and restores afterwards. Capture Mode defaults to `settings.screenshotsCaptureModeBoth`, which saves the image to the library and copies it to the clipboard. Folder-only uses `screenshots.captureSaved`, clipboard-only uses `screenshots.captureCopied`, and Both uses `screenshots.captureSavedAndCopied`; only captures saved to the folder are prepended to the library.
 
 ### Library views
 
@@ -29,11 +29,11 @@ Clicking an item opens the full-size viewer with previous/next navigation, copy,
 
 The tray icon menu carries the same three capture items (`screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`). They work while the main window is hidden in the tray, and the window stays hidden after the capture.
 
-Settings → `settings.sectionScreenshots` → `settings.screenshotsShortcuts` defines three system-wide capture hotkeys (defaults `Ctrl+Alt+R` region, `Ctrl+Alt+W` window, `Ctrl+Alt+F` fullscreen), each with its own enable toggle. Registration conflicts with other applications are reported when saving.
+Settings → `settings.sectionScreenshots` → `settings.screenshotsShortcuts` defines three system-wide capture hotkeys (defaults `Ctrl+Alt+R` region, `Ctrl+Alt+W` window, `Ctrl+Alt+F` fullscreen). The same three bindings also appear in Settings → Shortcuts and share one draft, so editing either location updates the other immediately. The per-row `settings.shortcutClear` action clears and disables a binding; entering a new accelerator enables it. Registration conflicts with other applications are reported when saving.
 
 ### Screenshots settings
 
-Settings → `settings.sectionScreenshots` owns the library folder (`settings.screenshotsFolder`, default: the Windows Pictures → Screenshots known folder), the save format (`settings.screenshotsFormat`: PNG by default, or JPEG with `settings.screenshotsJpegQuality`), and the global shortcuts. The DirectX capture acceleration toggle stays in Settings → General (`settings.useDirectxScreenCapture`); `settings.screenshotsDirectxNote` points there.
+Settings → `settings.sectionScreenshots` owns the library folder (`settings.screenshotsFolder`, default: the Windows Pictures → Screenshots known folder), Capture Mode (`settings.screenshotsCaptureMode`: folder, clipboard, or Both by default), image format (`settings.screenshotsFormat`: PNG by default or JPEG), the shared 1–100 `settings.screenshotsQuality` control, DirectX capture acceleration (`settings.useDirectxScreenCapture`), and the global shortcuts. JPEG interprets Quality as lossy image quality. PNG remains lossless and maps Quality to compression effort.
 
 ## Capture from a Pane
 
@@ -57,7 +57,7 @@ Failure: `workspace.screenshotCaptureError`. Outside the Tauri runtime: `workspa
 
 ## Capture targets
 
-Pane captures are transient by design: a capture is either copied to the clipboard or attached to the AI Assistant context; they do not enter the Screenshots Module library. Library captures are the Module's region/window/fullscreen actions above, saved as files in the screenshots folder.
+Pane captures are transient by design: a capture is either copied to the clipboard or attached to the AI Assistant context; they do not enter the Screenshots Module library. Screenshots Module region/window/fullscreen actions follow Capture Mode and can save to the library, copy to the clipboard, or do both.
 
 ## RDP screenshots
 

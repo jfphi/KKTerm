@@ -38,7 +38,7 @@ import { nativeMenuIcons } from "../../lib/nativeMenuIcons";
 import { showNativeContextMenu } from "../../lib/nativeContextMenu";
 import { invokeCommand, isTauriRuntime, type StoredScreenshot } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
-import { performLibraryCapture, type ScreenshotCaptureMode } from "./captureBridge";
+import { performScreenshotCapture, type ScreenshotCaptureMode } from "./captureBridge";
 import { LibraryView, type ScreenshotsViewMode } from "./LibraryView";
 import { ScreenshotViewer } from "./ScreenshotViewer";
 import { useScreenshotsStore } from "./state";
@@ -221,7 +221,7 @@ export function ScreenshotsPage({ active }: { active: boolean }) {
   }
 
   function capture(mode: ScreenshotCaptureMode) {
-    void performLibraryCapture(mode, t);
+    void performScreenshotCapture(mode, t);
   }
 
   const runtimeAvailable = isTauriRuntime();

@@ -1,49 +1,44 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotsModuleIcon } from "../../app/moduleIdentityIcons";
-import { invokeCommand, isTauriRuntime } from "../../lib/tauri";
 import { technicalInputProps } from "../../lib/inputBehavior";
+import { isWindowsPlatform } from "../../lib/platform";
 import { useWorkspaceStore } from "../../store";
-import type { ScreenshotSettings as ScreenshotSettingsModel } from "../../types";
 import { SettingsSectionHeader, useSettingsSaveRegistration } from "./shared";
 import { ToggleSwitch } from "./ToggleSwitch";
+import { ScreenshotShortcutRows } from "./ScreenshotShortcutRows";
+import {
+  screenshotSettingsHaveChanges,
+  useScreenshotSettingsDraft,
+} from "./screenshotSettingsDraft";
 
 export function ScreenshotsSettings() {
   const { t } = useTranslation();
   const showStatusBarNotice = useWorkspaceStore((state) => state.showStatusBarNotice);
-  const [saved, setSaved] = useState<ScreenshotSettingsModel | null>(null);
-  const [draft, setDraft] = useState<ScreenshotSettingsModel | null>(null);
-  const hasChanges =
-    Boolean(saved && draft) && JSON.stringify(draft) !== JSON.stringify(saved);
+  const saved = useScreenshotSettingsDraft((state) => state.saved);
+  const draft = useScreenshotSettingsDraft((state) => state.draft);
+  const useDirectxSaved = useScreenshotSettingsDraft((state) => state.useDirectxSaved);
+  const useDirectxDraft = useScreenshotSettingsDraft((state) => state.useDirectxDraft);
+  const load = useScreenshotSettingsDraft((state) => state.load);
+  const update = useScreenshotSettingsDraft((state) => state.update);
+  const updateUseDirectx = useScreenshotSettingsDraft((state) => state.updateUseDirectx);
+  const save = useScreenshotSettingsDraft((state) => state.save);
+  const hasChanges = screenshotSettingsHaveChanges({
+    saved,
+    draft,
+    useDirectxSaved,
+    useDirectxDraft,
+  });
 
   useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-    let disposed = false;
-    invokeCommand("get_screenshot_settings", undefined)
-      .then((settings) => {
-        if (!disposed) {
-          setSaved(settings);
-          setDraft(settings);
-        }
-      })
+    void load()
       .catch((error) => {
         showStatusBarNotice(error instanceof Error ? error.message : String(error), {
           tone: "error",
         });
       });
-    return () => {
-      disposed = true;
-    };
-    // Load once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function update(patch: Partial<ScreenshotSettingsModel>) {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
-  }
+  }, [load, showStatusBarNotice]);
 
   async function browseFolder() {
     try {
@@ -59,16 +54,10 @@ export function ScreenshotsSettings() {
   }
 
   async function handleSave() {
-    if (!draft) {
-      return;
-    }
     try {
-      const savedSettings = await invokeCommand("update_screenshot_settings", {
-        request: draft,
-      });
-      setSaved(savedSettings);
-      setDraft(savedSettings);
-      showStatusBarNotice(t("settings.screenshotsSaved"), { tone: "success" });
+      if (await save()) {
+        showStatusBarNotice(t("settings.screenshotsSaved"), { tone: "success" });
+      }
     } catch (error) {
       showStatusBarNotice(error instanceof Error ? error.message : String(error), {
         tone: "error",
@@ -77,40 +66,6 @@ export function ScreenshotsSettings() {
   }
 
   useSettingsSaveRegistration({ hasChanges, onSave: handleSave });
-
-  function shortcutRow(
-    label: string,
-    shortcutKey: "regionShortcut" | "windowShortcut" | "fullscreenShortcut",
-    enabledKey:
-      | "regionShortcutEnabled"
-      | "windowShortcutEnabled"
-      | "fullscreenShortcutEnabled",
-  ) {
-    if (!draft) {
-      return null;
-    }
-    return (
-      <div className="settings-list-row">
-        <div>
-          <strong>{label}</strong>
-        </div>
-        <div className="screenshots-shortcut-controls">
-          <input
-            {...technicalInputProps}
-            value={draft[shortcutKey]}
-            placeholder={t("settings.screenshotsShortcutPlaceholder")}
-            disabled={!draft[enabledKey]}
-            onChange={(event) => update({ [shortcutKey]: event.currentTarget.value })}
-            aria-label={label}
-          />
-          <ToggleSwitch
-            checked={draft[enabledKey]}
-            onChange={(checked) => update({ [enabledKey]: checked })}
-          />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <section className="settings-card settings-section">
@@ -149,6 +104,34 @@ export function ScreenshotsSettings() {
       </fieldset>
 
       <fieldset className="settings-subsection settings-fieldset">
+        <legend>{t("settings.screenshotsCaptureMode")}</legend>
+        <div>
+          <p className="field-hint">{t("settings.screenshotsCaptureModeHint")}</p>
+        </div>
+        <div className="form-grid one-column">
+          <label>
+            <span>{t("settings.screenshotsCaptureMode")}</span>
+            <select
+              value={draft?.captureMode ?? "both"}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                update({
+                  captureMode:
+                    value === "folder" || value === "clipboard" ? value : "both",
+                });
+              }}
+            >
+              <option value="folder">{t("settings.screenshotsCaptureModeFolder")}</option>
+              <option value="clipboard">
+                {t("settings.screenshotsCaptureModeClipboard")}
+              </option>
+              <option value="both">{t("settings.screenshotsCaptureModeBoth")}</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="settings-subsection settings-fieldset">
         <legend data-tutorial-id="settings.screenshotsFormat">
           {t("settings.screenshotsFormat")}
         </legend>
@@ -168,27 +151,50 @@ export function ScreenshotsSettings() {
               <option value="jpeg">{t("settings.screenshotsFormatJpeg")}</option>
             </select>
           </label>
-          {draft?.format === "jpeg" ? (
-            <label>
-              <span>{t("settings.screenshotsJpegQuality")}</span>
+          <label>
+            <span>{t("settings.screenshotsQuality")}</span>
+            <div className="screenshots-quality-row">
               <input
-                type="number"
                 min={1}
                 max={100}
-                value={draft.jpegQuality}
+                type="range"
+                value={draft?.quality ?? 90}
                 onChange={(event) => {
                   const parsed = Number.parseInt(event.currentTarget.value, 10);
                   update({
-                    jpegQuality: Number.isFinite(parsed)
+                    quality: Number.isFinite(parsed)
                       ? Math.min(100, Math.max(1, parsed))
                       : 90,
                   });
                 }}
               />
-            </label>
-          ) : null}
+              <output>{draft?.quality ?? 90}</output>
+            </div>
+            <small>{t("settings.screenshotsQualityHint")}</small>
+          </label>
         </div>
       </fieldset>
+
+      {isWindowsPlatform() ? (
+        <fieldset
+          className="settings-subsection settings-fieldset"
+          data-tutorial-id="settings.useDirectxScreenCapture"
+        >
+          <legend>{t("settings.performance")}</legend>
+          <div>
+            <p className="field-hint">{t("settings.performanceHint")}</p>
+          </div>
+          <div className="settings-toggle-list">
+            <label className="settings-toggle-row">
+              <ToggleSwitch checked={useDirectxDraft} onChange={updateUseDirectx} />
+              <span>
+                <strong>{t("settings.useDirectxScreenCapture")}</strong>
+                <small>{t("settings.useDirectxScreenCaptureHint")}</small>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+      ) : null}
 
       <fieldset className="settings-subsection settings-fieldset">
         <legend data-tutorial-id="settings.screenshotsShortcuts">
@@ -197,24 +203,9 @@ export function ScreenshotsSettings() {
         <div>
           <p className="field-hint">{t("settings.screenshotsShortcutsHint")}</p>
         </div>
-        <div className="settings-list" aria-label={t("settings.screenshotsShortcuts")}>
-          {shortcutRow(
-            t("screenshots.captureRegion"),
-            "regionShortcut",
-            "regionShortcutEnabled",
-          )}
-          {shortcutRow(
-            t("screenshots.captureWindow"),
-            "windowShortcut",
-            "windowShortcutEnabled",
-          )}
-          {shortcutRow(
-            t("screenshots.captureFullscreen"),
-            "fullscreenShortcut",
-            "fullscreenShortcutEnabled",
-          )}
+        <div className="shortcut-list" aria-label={t("settings.screenshotsShortcuts")}>
+          <ScreenshotShortcutRows />
         </div>
-        <p className="field-hint">{t("settings.screenshotsDirectxNote")}</p>
       </fieldset>
     </section>
   );

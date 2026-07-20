@@ -314,7 +314,7 @@ pending file per key under `docs/localization_todo/`).
   - About → portable badge, exact data path, and Open Data Folder action.
   - Install Helper → caption that installs are machine-local.
 - **Installed-to-portable creator**: installed Windows exposes
-  `settings.portableCreatorAction` under General → Settings data. Its two-step
+  `settings.portableCreatorAction` under General → Portable Install. Its two-step
   wizard selects the existing selective-export categories and an empty local
   or removable destination, then copies the running architecture's executable,
   CLI, manual, and bundled Assistant Skills and creates a launch-ready

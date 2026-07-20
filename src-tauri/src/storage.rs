@@ -939,8 +939,10 @@ pub struct ScreenshotSettings {
     folder_path: String,
     #[serde(default = "default_screenshot_format")]
     format: String,
-    #[serde(default = "default_screenshot_jpeg_quality")]
-    jpeg_quality: u8,
+    #[serde(default = "default_screenshot_quality", alias = "jpegQuality")]
+    quality: u8,
+    #[serde(default = "default_screenshot_capture_mode")]
+    capture_mode: String,
     #[serde(default = "default_screenshot_region_shortcut")]
     region_shortcut: String,
     #[serde(default = "default_screenshot_shortcut_enabled")]
@@ -964,8 +966,12 @@ impl ScreenshotSettings {
         &self.format
     }
 
-    pub(crate) fn jpeg_quality(&self) -> u8 {
-        self.jpeg_quality
+    pub(crate) fn quality(&self) -> u8 {
+        self.quality
+    }
+
+    pub(crate) fn capture_mode(&self) -> &str {
+        &self.capture_mode
     }
 
     pub(crate) fn region_shortcut(&self) -> &str {
@@ -5432,7 +5438,8 @@ fn default_screenshot_settings() -> ScreenshotSettings {
     ScreenshotSettings {
         folder_path: default_screenshot_folder_path(),
         format: default_screenshot_format(),
-        jpeg_quality: default_screenshot_jpeg_quality(),
+        quality: default_screenshot_quality(),
+        capture_mode: default_screenshot_capture_mode(),
         region_shortcut: default_screenshot_region_shortcut(),
         region_shortcut_enabled: default_screenshot_shortcut_enabled(),
         window_shortcut: default_screenshot_window_shortcut(),
@@ -5446,8 +5453,12 @@ fn default_screenshot_format() -> String {
     "png".to_string()
 }
 
-fn default_screenshot_jpeg_quality() -> u8 {
+fn default_screenshot_quality() -> u8 {
     90
+}
+
+fn default_screenshot_capture_mode() -> String {
+    "both".to_string()
 }
 
 fn default_screenshot_region_shortcut() -> String {
@@ -6352,7 +6363,13 @@ fn validate_screenshot_settings(
         "jpeg" | "jpg" => "jpeg".to_string(),
         _ => return Err("screenshot format must be png or jpeg".to_string()),
     };
-    settings.jpeg_quality = settings.jpeg_quality.clamp(1, 100);
+    settings.quality = settings.quality.clamp(1, 100);
+    settings.capture_mode = match settings.capture_mode.trim().to_lowercase().as_str() {
+        "folder" => "folder".to_string(),
+        "clipboard" => "clipboard".to_string(),
+        "" | "both" => "both".to_string(),
+        _ => return Err("screenshot capture mode must be folder, clipboard, or both".to_string()),
+    };
     settings.region_shortcut = settings.region_shortcut.trim().to_string();
     settings.window_shortcut = settings.window_shortcut.trim().to_string();
     settings.fullscreen_shortcut = settings.fullscreen_shortcut.trim().to_string();

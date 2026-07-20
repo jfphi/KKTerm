@@ -1,8 +1,8 @@
 # settings.portableCreatorAction
 
-- **English value**: `Create Portable Copy…`
+- **English value**: `Portable Copy Wizard`
 - **Namespace**: `settings`
-- **File/component**: `src/modules/settings/PortableCreatorDialog.tsx`
+- **File/component**: `src/modules/settings/GeneralSettings.tsx`
 - **UI role**: `button`
 - **User flow**: Portable-copy creation from Settings General.
 - **Tone**: concise/neutral

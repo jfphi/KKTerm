@@ -782,6 +782,11 @@ export interface StoredScreenshot {
   kind: "region" | "window" | "fullscreen" | "screenshot";
 }
 
+export interface ScreenshotCaptureResult {
+  storedScreenshot: StoredScreenshot | null;
+  copiedToClipboard: boolean;
+}
+
 export interface FullScreenshot {
   id: string;
   fileName: string;
@@ -2090,19 +2095,19 @@ type CommandMap = {
   };
   capture_screenshot_to_library: {
     args: { request: CaptureScreenshotRequest; kind: StoredScreenshot["kind"] };
-    result: StoredScreenshot;
+    result: ScreenshotCaptureResult;
   };
   capture_fullscreen_screenshot_to_library: {
     args: { kind: StoredScreenshot["kind"] };
-    result: StoredScreenshot;
+    result: ScreenshotCaptureResult;
   };
   capture_active_window_screenshot_to_library: {
     args: { kind: StoredScreenshot["kind"] };
-    result: StoredScreenshot;
+    result: ScreenshotCaptureResult;
   };
   capture_interactive_region_screenshot_to_library: {
     args: { kind: StoredScreenshot["kind"] };
-    result: StoredScreenshot;
+    result: ScreenshotCaptureResult;
   };
   list_screenshots: {
     args: { request: { offset?: number; limit?: number } };

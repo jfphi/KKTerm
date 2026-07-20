@@ -139,7 +139,6 @@ export function GeneralSettings() {
   const installerSupported = supportsInstallerHelper();
   const minimizeToTraySupported = supportsMinimizeToTray();
   const showWindowSettings = windowsPlatform || minimizeToTraySupported;
-  const showPerformanceSettings = windowsPlatform;
   const lastCheckedAt = useLastUpdateCheckAt();
   const [currentLanguage, setCurrentLanguage] =
     useState<SupportedLanguage>(detectLanguage);
@@ -517,7 +516,10 @@ export function GeneralSettings() {
       </fieldset>
 
       {showWindowSettings ? (
-        <fieldset className="settings-subsection settings-fieldset">
+        <fieldset
+          className="settings-subsection settings-fieldset"
+          data-tutorial-id="settings.workspaceAccess"
+        >
           <legend>{t("settings.workspaceAccess")}</legend>
           <div>
             <p className="field-hint">{t("settings.workspaceAccessHint")}</p>
@@ -551,35 +553,6 @@ export function GeneralSettings() {
                 </span>
               </label>
             ) : null}
-          </div>
-        </fieldset>
-      ) : null}
-
-      {showPerformanceSettings ? (
-        <fieldset
-          className="settings-subsection settings-fieldset"
-          data-tutorial-id="settings.workspaceAccess"
-        >
-          <legend>{t("settings.performance")}</legend>
-          <div>
-            <p className="field-hint">{t("settings.performanceHint")}</p>
-          </div>
-          <div className="settings-toggle-list">
-            <label
-              className="settings-toggle-row"
-              data-tutorial-id="settings.useDirectxScreenCapture"
-            >
-              <ToggleSwitch
-                checked={draft.useDirectxScreenCapture}
-                onChange={(checked) =>
-                  setDraft((s) => ({ ...s, useDirectxScreenCapture: checked }))
-                }
-              />
-              <span>
-                <strong>{t("settings.useDirectxScreenCapture")}</strong>
-                <small>{t("settings.useDirectxScreenCaptureHint")}</small>
-              </span>
-            </label>
           </div>
         </fieldset>
       ) : null}
@@ -687,16 +660,6 @@ export function GeneralSettings() {
             <Upload size={16} />
             {t("settings.importSettings")}
           </button>
-          {windowsPlatform && !portableMode ? (
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => setPortableCreatorOpen(true)}
-            >
-              <Copy size={16} />
-              {t("settings.portableCreatorAction")}
-            </button>
-          ) : null}
           <button
             className="secondary-button"
             type="button"
@@ -715,6 +678,28 @@ export function GeneralSettings() {
           </button>
         </div>
       </fieldset>
+
+      {windowsPlatform && !portableMode ? (
+        <fieldset className="settings-subsection settings-fieldset">
+          <legend>{t("settings.portableInstallSection")}</legend>
+          <div>
+            <p className="field-hint">{t("settings.portableCreatorIntro")}</p>
+          </div>
+          <div
+            className="settings-data-actions"
+            aria-label={t("settings.portableInstallSection")}
+          >
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setPortableCreatorOpen(true)}
+            >
+              <Copy size={16} />
+              {t("settings.portableCreatorAction")}
+            </button>
+          </div>
+        </fieldset>
+      ) : null}
 
       <fieldset
         className="settings-subsection settings-fieldset"
