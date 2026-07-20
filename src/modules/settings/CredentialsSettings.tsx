@@ -25,6 +25,8 @@ import {
   normalizeSecretStoreKind,
 } from "./credentialStorageModel";
 import { groupCredentialsByKind, groupCredentialsForSettings } from "./credentialGroups";
+import { SavedCredentialsManager } from "./SavedCredentialsManager";
+import { isLegacyConnectionPasswordRow } from "./savedCredentialsModel";
 import { SettingsSectionHeader, useSettingsSaveRegistration } from "./shared";
 import { UrlCredentialManager } from "./UrlCredentialManager";
 
@@ -91,7 +93,14 @@ export function CredentialsSettings() {
     [credentials],
   );
   const nonUrlStoredCredentials = useMemo(
-    () => storedCredentials.filter((credential) => credential.kind !== "urlPassword"),
+    () =>
+      storedCredentials.filter(
+        (credential) => credential.kind !== "urlPassword" && credential.kind !== "connectionPassword",
+      ),
+    [storedCredentials],
+  );
+  const legacyConnectionPasswords = useMemo(
+    () => storedCredentials.filter(isLegacyConnectionPasswordRow),
     [storedCredentials],
   );
   const storedCredentialGroups = useMemo(
@@ -329,6 +338,11 @@ export function CredentialsSettings() {
         <legend>{t("settings.credentialsStored")}</legend>
         <p className="field-hint">{t("settings.credentialsHint")}</p>
         <div className="settings-list" aria-label={t("settings.credentialsStored")}>
+          <SavedCredentialsManager
+            legacyCredentials={legacyConnectionPasswords}
+            onChanged={load}
+            onDeleteLegacy={setDeleteTarget}
+          />
           <div className="settings-credential-group">
             <h3>{t("settings.savedWebsitePasswords")}</h3>
             {loading && urlCredentials.length === 0 ? (

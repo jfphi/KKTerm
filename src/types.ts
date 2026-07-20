@@ -1506,6 +1506,19 @@ export interface ConnectionPasswordCredentialSummary {
   createdFromConnectionId?: string | null;
   createdAt: string;
   updatedAt: string;
+  usageCount: number;
+}
+
+export interface ConnectionPasswordCredentialEntry extends ConnectionPasswordCredentialSummary {
+  secretExists: boolean;
+}
+
+export interface ConnectionPasswordCredentialUsage {
+  connectionId: string;
+  name: string;
+  connectionType: ConnectionType;
+  host: string;
+  username: string;
 }
 
 export interface DeleteStoredCredentialRequest {

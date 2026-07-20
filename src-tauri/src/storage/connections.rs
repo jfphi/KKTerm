@@ -908,6 +908,7 @@ impl Storage {
     pub fn create_connection_password_credential_metadata(
         &self,
         connection_id: String,
+        label: Option<String>,
     ) -> Result<ConnectionPasswordCredentialSummary, String> {
         let connection_id = required_field("connection id", connection_id)?;
         self.with_connection(|connection| {
@@ -929,13 +930,24 @@ impl Storage {
             ensure_connection_password_type(&connection_type)?;
             let host = required_field("host", host)?;
             let username = username.trim().to_string();
-            let existing_count = connection_password_credential_existing_count(
-                connection,
-                &connection_id,
-                &connection_type,
-                &host,
-            )?;
-            let label = connection_password_credential_label(&username, &host, existing_count + 1);
+            let label = match label {
+                Some(value) => {
+                    let trimmed = value.trim().to_string();
+                    if trimmed.is_empty() {
+                        return Err("credential label is required".to_string());
+                    }
+                    trimmed
+                }
+                None => {
+                    let existing_count = connection_password_credential_existing_count(
+                        connection,
+                        &connection_id,
+                        &connection_type,
+                        &host,
+                    )?;
+                    connection_password_credential_label(&username, &host, existing_count + 1)
+                }
+            };
             let id = make_connection_password_credential_id();
             connection
                 .execute(
@@ -953,6 +965,90 @@ impl Storage {
                 )
                 .map_err(to_storage_error)?;
             get_connection_password_credential_by_id(connection, &id)
+        })
+    }
+
+    pub fn list_connection_password_credential_usage(
+        &self,
+        credential_id: String,
+    ) -> Result<Vec<ConnectionPasswordCredentialUsage>, String> {
+        let credential_id = required_field("password credential id", credential_id)?;
+        self.with_connection(|connection| {
+            list_connection_password_credential_usage(connection, &credential_id)
+        })
+    }
+
+    pub fn update_connection_password_credential(
+        &self,
+        credential_id: String,
+        label: Option<String>,
+        username: Option<String>,
+        host: Option<String>,
+    ) -> Result<ConnectionPasswordCredentialSummary, String> {
+        let credential_id = required_field("password credential id", credential_id)?;
+        self.with_connection(|connection| {
+            update_connection_password_credential(
+                connection,
+                &credential_id,
+                label,
+                username,
+                host,
+            )
+        })
+    }
+
+    pub fn create_standalone_connection_password_credential(
+        &self,
+        connection_type: String,
+        label: String,
+        username: String,
+        host: Option<String>,
+    ) -> Result<ConnectionPasswordCredentialSummary, String> {
+        let connection_type = required_field("connection type", connection_type)?;
+        self.with_connection(|connection| {
+            create_standalone_connection_password_credential(
+                connection,
+                &connection_type,
+                &label,
+                &username,
+                host.as_deref(),
+            )
+        })
+    }
+
+    pub fn find_reusable_connection_password_credentials(
+        &self,
+        connection_id: String,
+    ) -> Result<Vec<ConnectionPasswordCredentialSummary>, String> {
+        let connection_id = required_field("connection id", connection_id)?;
+        self.with_connection(|connection| {
+            find_reusable_connection_password_credentials(connection, &connection_id)
+        })
+    }
+
+    pub fn merge_connection_password_credentials(
+        &self,
+        target_credential_id: String,
+        source_credential_ids: Vec<String>,
+    ) -> Result<i64, String> {
+        let target_credential_id =
+            required_field("password credential id", target_credential_id)?;
+        self.with_connection_mut(|connection| {
+            merge_connection_password_credentials(
+                connection,
+                &target_credential_id,
+                &source_credential_ids,
+            )
+        })
+    }
+
+    pub fn unassign_connection_password_credential(
+        &self,
+        connection_id: String,
+    ) -> Result<SavedConnection, String> {
+        let connection_id = required_field("connection id", connection_id)?;
+        self.with_connection(|connection| {
+            unassign_connection_password_credential(connection, &connection_id)
         })
     }
 
