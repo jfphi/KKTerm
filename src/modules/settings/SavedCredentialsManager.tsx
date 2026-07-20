@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Pencil, Plus, Trash2, Users } from "../../lib/reicon";
+import { Link, Plus, Trash2 } from "../../lib/reicon";
 import { ConfirmSheet } from "../../app/ui/dialog";
 import { invokeCommand, isTauriRuntime } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
@@ -8,7 +8,6 @@ import type {
   ConnectionPasswordCredentialEntry,
   StoredCredentialSummary,
 } from "../../types";
-import { connectionTypeLabel } from "../workspace/connections/utils";
 import { SavedCredentialConvertDialog } from "./SavedCredentialConvertDialog";
 import { SavedCredentialEditDialog } from "./SavedCredentialEditDialog";
 import { SavedCredentialMergeDialog } from "./SavedCredentialMergeDialog";
@@ -118,7 +117,7 @@ export function SavedCredentialsManager({
               <button
                 className="secondary-button"
                 disabled={!merge.ok}
-                title={merge.ok ? undefined : t("settings.savedCredentialMergeTypeHint")}
+                title={merge.ok ? undefined : t("settings.savedCredentialMergeSelectionHint")}
                 type="button"
                 onClick={() => setMergeOpen(true)}
               >
@@ -149,48 +148,54 @@ export function SavedCredentialsManager({
         ) : visible.length === 0 ? (
           <p className="settings-empty-state">{t("settings.savedCredentialsEmpty")}</p>
         ) : (
-          <div className="settings-list" aria-label={t("settings.savedCredentials")}>
+          <div
+            className="settings-saved-credential-grid"
+            role="grid"
+            aria-label={t("settings.savedCredentials")}
+          >
+            <div className="settings-saved-credential-grid-header" role="row">
+              <span aria-hidden="true" />
+              <span role="columnheader">{t("settings.savedCredentialName")}</span>
+              <span role="columnheader">{t("settings.savedCredentialUsername")}</span>
+              <span role="columnheader">{t("app.connections")}</span>
+              <span aria-hidden="true" />
+            </div>
             {visible.map((credential) => (
-              <div className="settings-list-row settings-saved-credential-row" key={credential.id}>
-                <input
-                  aria-label={t("settings.savedCredentialMergeSelect", { label: credential.label })}
-                  checked={selection.has(credential.id)}
-                  className="settings-saved-credential-check"
-                  type="checkbox"
-                  onChange={(event) => toggleSelection(credential.id, event.currentTarget.checked)}
-                />
-                <div className="settings-credential-summary">
-                  <strong>{credential.label}</strong>
-                  <span>
-                    {[
-                      credential.username,
-                      connectionTypeLabel(credential.connectionType),
-                      credential.host,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    {credential.secretExists ? "" : ` · ${t("settings.credentialMissingSecret")}`}
-                  </span>
+              <div className="settings-saved-credential-grid-row" key={credential.id} role="row">
+                <div className="settings-saved-credential-grid-cell is-select" role="gridcell">
+                  <input
+                    aria-label={t("settings.savedCredentialMergeSelect", { label: credential.label })}
+                    checked={selection.has(credential.id)}
+                    type="checkbox"
+                    onChange={(event) => toggleSelection(credential.id, event.currentTarget.checked)}
+                  />
                 </div>
-                <div className="settings-list-actions">
+                <div className="settings-saved-credential-grid-cell is-name" role="gridcell">
                   <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => setUsageTarget(credential)}
-                  >
-                    <Users size={15} />
-                    {credential.usageCount > 0
-                      ? t("settings.savedCredentialUsedBy", { count: credential.usageCount })
-                      : t("settings.savedCredentialUnused")}
-                  </button>
-                  <button
-                    className="secondary-button"
+                    className="settings-credential-name-button"
                     type="button"
                     onClick={() => setEditTarget(credential)}
                   >
-                    <Pencil size={15} />
-                    {t("common.edit")}
+                    {credential.label}
                   </button>
+                  {!credential.secretExists ? (
+                    <small>{t("settings.credentialMissingSecret")}</small>
+                  ) : null}
+                </div>
+                <div className="settings-saved-credential-grid-cell" role="gridcell">
+                  <span title={credential.username}>{credential.username || "—"}</span>
+                </div>
+                <div className="settings-saved-credential-grid-cell is-usage" role="gridcell">
+                  <button
+                    aria-label={t("settings.savedCredentialUsageTitle", { label: credential.label })}
+                    className="settings-credential-count-button"
+                    type="button"
+                    onClick={() => setUsageTarget(credential)}
+                  >
+                    {credential.usageCount}
+                  </button>
+                </div>
+                <div className="settings-saved-credential-grid-actions" role="gridcell">
                   <button
                     aria-label={t("settings.deleteCredential")}
                     className="settings-icon-danger-button"

@@ -912,9 +912,9 @@ impl Storage {
     ) -> Result<ConnectionPasswordCredentialSummary, String> {
         let connection_id = required_field("connection id", connection_id)?;
         self.with_connection(|connection| {
-            let (connection_type, host, username) = connection
+            let (connection_type, connection_name, username) = connection
                 .query_row(
-                    "SELECT connection_type, host, username FROM connections WHERE id = ?1",
+                    "SELECT connection_type, name, username FROM connections WHERE id = ?1",
                     params![&connection_id],
                     |row| {
                         Ok((
@@ -928,7 +928,6 @@ impl Storage {
                 .map_err(to_storage_error)?
                 .ok_or_else(|| "connection was not found".to_string())?;
             ensure_connection_password_type(&connection_type)?;
-            let host = required_field("host", host)?;
             let username = username.trim().to_string();
             let label = match label {
                 Some(value) => {
@@ -942,22 +941,19 @@ impl Storage {
                     let existing_count = connection_password_credential_existing_count(
                         connection,
                         &connection_id,
-                        &connection_type,
-                        &host,
                     )?;
-                    connection_password_credential_label(&username, &host, existing_count + 1)
+                    connection_password_credential_label(&connection_name, existing_count + 1)
                 }
             };
             let id = make_connection_password_credential_id();
             connection
                 .execute(
                     "INSERT INTO connection_password_credentials
-                        (id, connection_type, host, username, label, created_from_connection_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        (id, connection_type, username, label, created_from_connection_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         &id,
                         &connection_type,
-                        &host,
                         &username,
                         &label,
                         &connection_id
@@ -983,7 +979,6 @@ impl Storage {
         credential_id: String,
         label: Option<String>,
         username: Option<String>,
-        host: Option<String>,
     ) -> Result<ConnectionPasswordCredentialSummary, String> {
         let credential_id = required_field("password credential id", credential_id)?;
         self.with_connection(|connection| {
@@ -992,26 +987,20 @@ impl Storage {
                 &credential_id,
                 label,
                 username,
-                host,
             )
         })
     }
 
     pub fn create_standalone_connection_password_credential(
         &self,
-        connection_type: String,
         label: String,
         username: String,
-        host: Option<String>,
     ) -> Result<ConnectionPasswordCredentialSummary, String> {
-        let connection_type = required_field("connection type", connection_type)?;
         self.with_connection(|connection| {
             create_standalone_connection_password_credential(
                 connection,
-                &connection_type,
                 &label,
                 &username,
-                host.as_deref(),
             )
         })
     }
@@ -1070,22 +1059,16 @@ impl Storage {
                 .map_err(to_storage_error)?
                 .ok_or_else(|| "connection was not found".to_string())?;
             ensure_connection_password_type(&connection_type)?;
-            if let Some(credential_type) = connection
+            let credential_username = connection
                 .query_row(
-                    "SELECT connection_type FROM connection_password_credentials WHERE id = ?1",
+                    "SELECT username FROM connection_password_credentials WHERE id = ?1",
                     params![&credential_id],
                     |row| row.get::<_, String>(0),
                 )
                 .optional()
-                .map_err(to_storage_error)?
-            {
-                if credential_type != connection_type {
-                    return Err(
-                        "password credential type must match the connection type".to_string()
-                    );
-                }
-            } else {
-                let legacy_type = connection
+                .map_err(to_storage_error)?;
+            if credential_username.is_none() {
+                connection
                     .query_row(
                         "SELECT connection_type FROM connections WHERE id = ?1",
                         params![&credential_id],
@@ -1094,16 +1077,18 @@ impl Storage {
                     .optional()
                     .map_err(to_storage_error)?
                     .ok_or_else(|| "password credential was not found".to_string())?;
-                if legacy_type != connection_type {
-                    return Err(
-                        "password credential type must match the connection type".to_string()
-                    );
-                }
             }
             connection
                 .execute(
-                    "UPDATE connections SET password_credential_id = ?1 WHERE id = ?2",
-                    params![&credential_id, &connection_id],
+                    "UPDATE connections
+                     SET password_credential_id = ?1,
+                         username = CASE WHEN ?3 <> '' THEN ?3 ELSE username END
+                     WHERE id = ?2",
+                    params![
+                        &credential_id,
+                        &connection_id,
+                        credential_username.unwrap_or_default().trim()
+                    ],
                 )
                 .map_err(to_storage_error)?;
             get_connection_by_id(connection, &connection_id)

@@ -13,7 +13,7 @@ use std::{
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-const SCHEMA_USER_VERSION: i32 = 49;
+const SCHEMA_USER_VERSION: i32 = 50;
 
 const DEFAULT_TERMINAL_OPACITY: u8 = 50;
 
@@ -125,16 +125,12 @@ CREATE INDEX IF NOT EXISTS idx_url_credentials_connection
 CREATE TABLE IF NOT EXISTS connection_password_credentials (
     id TEXT PRIMARY KEY,
     connection_type TEXT NOT NULL CHECK (connection_type IN ('ssh', 'telnet', 'rdp', 'vnc', 'ftp')),
-    host TEXT NOT NULL,
     username TEXT NOT NULL,
     label TEXT NOT NULL,
     created_from_connection_id TEXT REFERENCES connections(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE INDEX IF NOT EXISTS idx_connection_password_credentials_type_host
-    ON connection_password_credentials(connection_type, host);
 
 CREATE TABLE IF NOT EXISTS encrypted_secret_store_entries (
     secret_key TEXT PRIMARY KEY,
@@ -1770,7 +1766,6 @@ pub struct StoredCredentialCandidate {
 pub struct ConnectionPasswordCredentialSummary {
     pub(crate) id: String,
     pub(crate) connection_type: String,
-    pub(crate) host: String,
     pub(crate) username: String,
     pub(crate) label: String,
     pub(crate) created_from_connection_id: Option<String>,
@@ -2791,6 +2786,19 @@ impl Storage {
         if stored_version < 47 {
             reveal_it_ops_on_release(&connection)?;
         }
+        // v50: Saved Credentials are protocol-neutral username/password bundles;
+        // the owning Connections retain their own host metadata.
+        if stored_version < 50
+            && table_exists(&connection, "connection_password_credentials")?
+            && column_exists(&connection, "connection_password_credentials", "host")?
+        {
+            connection
+                .execute_batch(
+                    "DROP INDEX IF EXISTS idx_connection_password_credentials_type_host;
+                     ALTER TABLE connection_password_credentials DROP COLUMN host;",
+                )
+                .map_err(to_storage_error)?;
+        }
         connection
             .execute_batch(&format!("PRAGMA user_version = {SCHEMA_USER_VERSION}"))
             .map_err(to_storage_error)?;
@@ -3199,7 +3207,6 @@ fn repair_connections_scratch_references(
         CREATE TABLE connection_password_credentials (
             id TEXT PRIMARY KEY,
             connection_type TEXT NOT NULL CHECK (connection_type IN ('ssh', 'telnet', 'rdp', 'vnc', 'ftp')),
-            host TEXT NOT NULL,
             username TEXT NOT NULL,
             label TEXT NOT NULL,
             created_from_connection_id TEXT REFERENCES connections(id) ON DELETE SET NULL,
@@ -3207,11 +3214,11 @@ fn repair_connections_scratch_references(
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO connection_password_credentials (
-            id, connection_type, host, username, label, created_from_connection_id,
+            id, connection_type, username, label, created_from_connection_id,
             created_at, updated_at
         )
         SELECT
-            id, connection_type, host, username, label,
+            id, connection_type, username, label,
             CASE
                 WHEN created_from_connection_id IS NULL THEN NULL
                 WHEN EXISTS (
@@ -3228,9 +3235,6 @@ fn repair_connections_scratch_references(
             ON connection_tags(connection_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_url_credentials_connection
             ON url_credentials(connection_id);
-        CREATE INDEX IF NOT EXISTS idx_connection_password_credentials_type_host
-            ON connection_password_credentials(connection_type, host);
-
         COMMIT;
         "#,
     );
@@ -3455,12 +3459,9 @@ fn list_connection_password_credential_candidates(
             secret_kind: "connectionPassword".to_string(),
             owner_id: credential.id,
             label: credential.label,
-            detail: Some(format!(
-                "{} - {}",
-                credential.connection_type, credential.host
-            )),
-            connection_type: Some(credential.connection_type),
-            host: Some(credential.host),
+            detail: None,
+            connection_type: None,
+            host: None,
             username: (!credential.username.trim().is_empty()).then_some(credential.username),
             updated_at: Some(credential.updated_at),
             metadata_source: "connectionPasswordCredentials".to_string(),
@@ -3473,12 +3474,12 @@ fn list_connection_password_credentials(
 ) -> Result<Vec<ConnectionPasswordCredentialSummary>, String> {
     let mut statement = connection
         .prepare(
-             "SELECT id, connection_type, host, username, label, created_from_connection_id,
+             "SELECT id, connection_type, username, label, created_from_connection_id,
                      created_at, updated_at,
                      (SELECT COUNT(*) FROM connections c
                       WHERE c.password_credential_id = connection_password_credentials.id)
               FROM connection_password_credentials
-              ORDER BY lower(connection_type), lower(host), lower(username), created_at",
+              ORDER BY lower(label), lower(username), created_at",
         )
         .map_err(to_storage_error)?;
     let rows = statement
@@ -4245,13 +4246,12 @@ fn connection_password_credential_from_row(
     Ok(ConnectionPasswordCredentialSummary {
         id: row.get(0)?,
         connection_type: row.get(1)?,
-        host: row.get(2)?,
-        username: row.get(3)?,
-        label: row.get(4)?,
-        created_from_connection_id: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
-        usage_count: row.get(8)?,
+        username: row.get(2)?,
+        label: row.get(3)?,
+        created_from_connection_id: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        usage_count: row.get(7)?,
     })
 }
 
@@ -4261,7 +4261,7 @@ fn get_connection_password_credential_by_id(
 ) -> Result<ConnectionPasswordCredentialSummary, String> {
     connection
         .query_row(
-            "SELECT id, connection_type, host, username, label, created_from_connection_id,
+            "SELECT id, connection_type, username, label, created_from_connection_id,
                     created_at, updated_at,
                     (SELECT COUNT(*) FROM connections c
                      WHERE c.password_credential_id = connection_password_credentials.id)
@@ -4275,28 +4275,22 @@ fn get_connection_password_credential_by_id(
 
 fn connection_password_credential_existing_count(
     connection: &SqliteConnection,
-    _connection_id: &str,
-    connection_type: &str,
-    host: &str,
+    connection_id: &str,
 ) -> Result<i64, String> {
     connection
         .query_row(
             "SELECT COUNT(*) FROM connection_password_credentials
-             WHERE connection_type = ?1 AND host = ?2",
-            params![connection_type, host],
+             WHERE created_from_connection_id = ?1",
+            params![connection_id],
             |row| row.get(0),
         )
         .map_err(to_storage_error)
 }
 
-fn connection_password_credential_label(username: &str, host: &str, ordinal: i64) -> String {
-    let base = if username.trim().is_empty() {
-        host.to_string()
-    } else {
-        format!("{} @ {}", username.trim(), host)
-    };
+fn connection_password_credential_label(connection_name: &str, ordinal: i64) -> String {
+    let base = connection_name.trim();
     if ordinal <= 1 {
-        base
+        base.to_string()
     } else {
         format!("{base} #{ordinal}")
     }
@@ -4334,7 +4328,6 @@ fn update_connection_password_credential(
     credential_id: &str,
     label: Option<String>,
     username: Option<String>,
-    host: Option<String>,
 ) -> Result<ConnectionPasswordCredentialSummary, String> {
     let current = get_connection_password_credential_by_id(connection, credential_id)
         .map_err(|_| "password credential was not found".to_string())?;
@@ -4348,46 +4341,49 @@ fn update_connection_password_credential(
         }
         None => current.label,
     };
+    let updated_username = username.is_some();
     let username = match username {
         Some(value) => value.trim().to_string(),
         None => current.username,
     };
-    let host = match host {
-        Some(value) => value.trim().to_string(),
-        None => current.host,
-    };
     connection
         .execute(
             "UPDATE connection_password_credentials
-             SET label = ?2, username = ?3, host = ?4, updated_at = CURRENT_TIMESTAMP
+             SET label = ?2, username = ?3, updated_at = CURRENT_TIMESTAMP
              WHERE id = ?1",
-            params![credential_id, label, username, host],
+            params![credential_id, label, username],
         )
         .map_err(to_storage_error)?;
+    if updated_username && !username.is_empty() {
+        connection
+            .execute(
+                "UPDATE connections SET username = ?2 WHERE password_credential_id = ?1",
+                params![credential_id, username],
+            )
+            .map_err(to_storage_error)?;
+    }
     get_connection_password_credential_by_id(connection, credential_id)
 }
 
 fn create_standalone_connection_password_credential(
     connection: &SqliteConnection,
-    connection_type: &str,
     label: &str,
     username: &str,
-    host: Option<&str>,
 ) -> Result<ConnectionPasswordCredentialSummary, String> {
-    ensure_connection_password_type(connection_type)?;
     let label = label.trim().to_string();
     if label.is_empty() {
         return Err("credential label is required".to_string());
     }
     let username = username.trim().to_string();
-    let host = host.unwrap_or("").trim().to_string();
     let id = make_connection_password_credential_id();
     connection
         .execute(
             "INSERT INTO connection_password_credentials
-                (id, connection_type, host, username, label, created_from_connection_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
-            params![&id, connection_type, &host, &username, &label],
+                (id, connection_type, username, label, created_from_connection_id)
+             VALUES (?1, 'ssh', ?2, ?3, NULL)",
+            // The legacy origin-type column stays populated for database/export
+            // compatibility; it no longer limits where a credential can be used.
+            params![&id, &username, &label],
         )
         .map_err(to_storage_error)?;
     get_connection_password_credential_by_id(connection, &id)
@@ -4397,16 +4393,12 @@ fn find_reusable_connection_password_credentials(
     connection: &SqliteConnection,
     connection_id: &str,
 ) -> Result<Vec<ConnectionPasswordCredentialSummary>, String> {
-    let (connection_type, host, username) = connection
+    let (connection_type, username) = connection
         .query_row(
-            "SELECT connection_type, host, username FROM connections WHERE id = ?1",
+            "SELECT connection_type, username FROM connections WHERE id = ?1",
             params![connection_id],
             |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             },
         )
         .optional()
@@ -4419,20 +4411,17 @@ fn find_reusable_connection_password_credentials(
     }
     let mut statement = connection
         .prepare(
-            "SELECT id, connection_type, host, username, label, created_from_connection_id,
+            "SELECT id, connection_type, username, label, created_from_connection_id,
                     created_at, updated_at,
                     (SELECT COUNT(*) FROM connections c
                      WHERE c.password_credential_id = connection_password_credentials.id)
              FROM connection_password_credentials
-             WHERE connection_type = ?1 AND username = ?2
-             ORDER BY (host = ?3) DESC, created_at",
+             WHERE username = ?1
+             ORDER BY created_at",
         )
         .map_err(to_storage_error)?;
     let rows = statement
-        .query_map(
-            params![connection_type, username, host],
-            connection_password_credential_from_row,
-        )
+        .query_map(params![username], connection_password_credential_from_row)
         .map_err(to_storage_error)?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(to_storage_error)
@@ -4453,11 +4442,8 @@ fn merge_connection_password_credentials(
         if source_id == target_credential_id {
             return Err("a credential cannot be merged into itself".to_string());
         }
-        let source = get_connection_password_credential_by_id(&transaction, source_id)
+        get_connection_password_credential_by_id(&transaction, source_id)
             .map_err(|_| "password credential was not found".to_string())?;
-        if source.connection_type != target.connection_type {
-            return Err("password credential types must match to merge".to_string());
-        }
     }
     let placeholders = source_credential_ids
         .iter()
@@ -4465,9 +4451,15 @@ fn merge_connection_password_credentials(
         .collect::<Vec<_>>()
         .join(", ");
     let relink_sql = format!(
-        "UPDATE connections SET password_credential_id = ?1 WHERE password_credential_id IN ({placeholders})"
+        "UPDATE connections
+         SET password_credential_id = ?1,
+             username = CASE WHEN ?2 <> '' THEN ?2 ELSE username END
+         WHERE password_credential_id IN ({placeholders})"
     );
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(target_credential_id.to_string())];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(target_credential_id.to_string()),
+        Box::new(target.username),
+    ];
     for source_id in source_credential_ids {
         params.push(Box::new(source_id.clone()));
     }

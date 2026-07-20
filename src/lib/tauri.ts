@@ -2270,7 +2270,6 @@ type CommandMap = {
         credentialId: string;
         label?: string;
         username?: string;
-        host?: string;
         secret?: string;
       };
     };
@@ -2283,10 +2282,8 @@ type CommandMap = {
   create_standalone_connection_password_credential: {
     args: {
       request: {
-        connectionType: string;
         label: string;
         username: string;
-        host?: string;
         secret: string;
       };
     };

@@ -171,7 +171,6 @@ struct UpdateConnectionPasswordCredentialRequest {
     credential_id: String,
     label: Option<String>,
     username: Option<String>,
-    host: Option<String>,
     secret: Option<String>,
 }
 
@@ -184,10 +183,8 @@ struct ConnectionPasswordCredentialUsageRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateStandaloneConnectionPasswordCredentialRequest {
-    connection_type: String,
     label: String,
     username: String,
-    host: Option<String>,
     secret: String,
 }
 
@@ -2325,7 +2322,6 @@ fn update_connection_password_credential(
         request.credential_id.clone(),
         request.label,
         request.username,
-        request.host,
     )?;
     if let Some(secret) = request.secret {
         if !secret.is_empty() {
@@ -2364,10 +2360,8 @@ fn create_standalone_connection_password_credential(
         return Err("secret value is required".to_string());
     }
     let credential = storage.create_standalone_connection_password_credential(
-        request.connection_type,
         request.label,
         request.username,
-        request.host,
     )?;
     if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
         credential.id.clone(),

@@ -354,13 +354,11 @@ export function CredentialsSettings() {
           {storedCredentialGroups.map(({ kind, rows }) => (
             <div className="settings-credential-group" key={kind}>
               <h3>{t(credentialKindKey(kind))}</h3>
-              {rows.map((credential) => (
-                <CredentialRow
-                  credential={credential}
-                  key={credential.id}
-                  onDelete={setDeleteTarget}
-                />
-              ))}
+              <CredentialGrid
+                ariaLabel={t(credentialKindKey(kind))}
+                credentials={rows}
+                onDelete={setDeleteTarget}
+              />
             </div>
           ))}
         </div>
@@ -377,15 +375,11 @@ export function CredentialsSettings() {
             {loading ? t("common.loading") : t("settings.widgetCredentialsEmpty")}
           </p>
         ) : (
-          <div className="settings-list" aria-label={t("settings.widgetCredentialsStored")}>
-            {widgetCredentials.map((credential) => (
-              <CredentialRow
-                credential={credential}
-                key={credential.id}
-                onDelete={setDeleteTarget}
-              />
-            ))}
-          </div>
+          <CredentialGrid
+            ariaLabel={t("settings.widgetCredentialsStored")}
+            credentials={widgetCredentials}
+            onDelete={setDeleteTarget}
+          />
         )}
       </fieldset>
 
@@ -429,33 +423,48 @@ function secretStoreLabelKey(store: SecretStoreKind, portableMode = false) {
   }
 }
 
-function CredentialRow({
-  credential,
+function CredentialGrid({
+  ariaLabel,
+  credentials,
   onDelete,
 }: {
-  credential: StoredCredentialSummary;
+  ariaLabel: string;
+  credentials: StoredCredentialSummary[];
   onDelete: (credential: StoredCredentialSummary) => void;
 }) {
   const { t } = useTranslation();
 
   return (
-    <div className="settings-list-row">
-      <div className="settings-credential-summary">
-        <strong>{credential.label}</strong>
-        <span>
-          {credential.detail
-            ? `${credential.detail} - ${t(credentialDescriptionKey(credential))}`
-            : t(credentialDescriptionKey(credential))}
-        </span>
+    <div className="settings-secret-credential-grid" role="grid" aria-label={ariaLabel}>
+      <div className="settings-secret-credential-grid-header" role="row">
+        <span role="columnheader">{t("settings.credentialColumnName")}</span>
+        <span role="columnheader">{t("settings.credentialColumnDetails")}</span>
+        <span role="columnheader">{t("settings.credentialColumnStatus")}</span>
+        <span aria-hidden="true" />
       </div>
-      <button
-        aria-label={t("settings.deleteCredential")}
-        className="settings-icon-danger-button"
-        type="button"
-        onClick={() => void onDelete(credential)}
-      >
-        <Trash2 size={16} />
-      </button>
+      {credentials.map((credential) => (
+        <div className="settings-secret-credential-grid-row" key={credential.id} role="row">
+          <div className="settings-secret-credential-grid-cell" role="gridcell">
+            <strong title={credential.label}>{credential.label}</strong>
+          </div>
+          <div className="settings-secret-credential-grid-cell" role="gridcell">
+            <span title={credential.detail ?? undefined}>{credential.detail || "—"}</span>
+          </div>
+          <div className="settings-secret-credential-grid-cell" role="gridcell">
+            <span>{t(credentialDescriptionKey(credential))}</span>
+          </div>
+          <div className="settings-secret-credential-grid-actions" role="gridcell">
+            <button
+              aria-label={t("settings.deleteCredential")}
+              className="settings-icon-danger-button"
+              type="button"
+              onClick={() => void onDelete(credential)}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

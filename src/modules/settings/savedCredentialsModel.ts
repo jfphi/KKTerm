@@ -20,7 +20,7 @@ export function filterSavedCredentials(
     return credentials;
   }
   return credentials.filter((credential) =>
-    [credential.label, credential.username, credential.host, credential.connectionType]
+    [credential.label, credential.username]
       .filter(Boolean)
       .some((value) => value.toLowerCase().includes(needle)),
   );
@@ -58,15 +58,9 @@ export function defaultMergeTargetId(
   );
 }
 
-/** Merge requires at least two credentials of one Connection type. */
+/** Merge requires at least two reusable credentials. */
 export function mergeEligibility(
   selected: ConnectionPasswordCredentialEntry[],
-): { ok: boolean; connectionType?: string } {
-  if (selected.length < 2) {
-    return { ok: false };
-  }
-  const connectionType = selected[0].connectionType;
-  return selected.every((credential) => credential.connectionType === connectionType)
-    ? { ok: true, connectionType }
-    : { ok: false };
+): { ok: boolean } {
+  return { ok: selected.length >= 2 };
 }
