@@ -1500,7 +1500,6 @@ export interface StoredCredentialSummary {
 export interface ConnectionPasswordCredentialSummary {
   id: string;
   connectionType: ConnectionType;
-  host: string;
   username: string;
   label: string;
   createdFromConnectionId?: string | null;

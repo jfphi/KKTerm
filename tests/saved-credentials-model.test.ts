@@ -17,7 +17,6 @@ function entry(overrides: Partial<ConnectionPasswordCredentialEntry>): Connectio
   return {
     id: "credential-1",
     connectionType: "ssh",
-    host: "",
     username: "admin",
     label: "Credential",
     createdAt: "2026-01-01 00:00:00",
@@ -44,10 +43,10 @@ test("legacy per-Connection password rows come only from the connections metadat
   assert.equal(isLegacyConnectionPasswordRow(url), false);
 });
 
-test("saved credential search matches label, username, host, and type case-insensitively", () => {
+test("saved credential search matches label and username case-insensitively", () => {
   const credentials = [
     entry({ id: "a", label: "Corp admin", username: "administrator" }),
-    entry({ id: "b", label: "Backup", host: "bastion.internal" }),
+    entry({ id: "b", label: "Backup", username: "backup-admin" }),
     entry({ id: "c", label: "Windows", connectionType: "rdp" }),
   ];
 
@@ -56,13 +55,10 @@ test("saved credential search matches label, username, host, and type case-insen
     ["a"],
   );
   assert.deepEqual(
-    filterSavedCredentials(credentials, "bastion").map((credential) => credential.id),
+    filterSavedCredentials(credentials, "backup-admin").map((credential) => credential.id),
     ["b"],
   );
-  assert.deepEqual(
-    filterSavedCredentials(credentials, "rdp").map((credential) => credential.id),
-    ["c"],
-  );
+  assert.equal(filterSavedCredentials(credentials, "rdp").length, 0);
   assert.deepEqual(
     filterSavedCredentials(credentials, "administrator").map((credential) => credential.id),
     ["a"],
@@ -99,14 +95,14 @@ test("merge target must keep a stored password when any selected credential has 
   assert.equal(defaultMergeTargetId([]), "");
 });
 
-test("merge requires two or more credentials of one Connection type", () => {
+test("merge requires two or more credentials regardless of their legacy origin type", () => {
   assert.deepEqual(mergeEligibility([entry({ id: "a" })]), { ok: false });
   assert.deepEqual(
     mergeEligibility([entry({ id: "a" }), entry({ id: "b" })]),
-    { ok: true, connectionType: "ssh" },
+    { ok: true },
   );
   assert.deepEqual(
     mergeEligibility([entry({ id: "a" }), entry({ id: "b", connectionType: "rdp" })]),
-    { ok: false },
+    { ok: true },
   );
 });

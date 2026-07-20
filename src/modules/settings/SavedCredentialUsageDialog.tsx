@@ -16,6 +16,10 @@ import type {
 } from "../../types";
 import { flattenConnections } from "../workspace/connections/treeUtils";
 
+function supportsSavedPassword(connection: Connection) {
+  return ["ssh", "telnet", "rdp", "vnc", "ftp"].includes(connection.type);
+}
+
 export function SavedCredentialUsageDialog({
   credential,
   onChanged,
@@ -45,7 +49,7 @@ export function SavedCredentialUsageDialog({
       setCandidates(
         flattenConnections(tree).filter(
           (connection) =>
-            connection.type === credential.connectionType &&
+            supportsSavedPassword(connection) &&
             connection.passwordCredentialId !== credential.id,
         ),
       );

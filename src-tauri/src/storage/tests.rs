@@ -282,6 +282,68 @@ fn current_schema_fast_path_skips_legacy_data_migrations() {
 }
 
 #[test]
+fn v50_saved_credential_migration_drops_host_and_current_reopen_keeps_shape() {
+    let db_path = temp_db_path("saved-credential-v50");
+    {
+        let storage = Storage::open(db_path.clone()).expect("current storage opens");
+        storage
+            .create_standalone_connection_password_credential(
+                "Corp admin".to_string(),
+                "admin".to_string(),
+            )
+            .expect("credential is created");
+    }
+    {
+        let connection = rusqlite::Connection::open(&db_path).expect("raw database opens");
+        connection
+            .execute_batch(
+                "ALTER TABLE connection_password_credentials
+                     ADD COLUMN host TEXT NOT NULL DEFAULT '';
+                 UPDATE connection_password_credentials SET host = 'legacy.internal';
+                 CREATE INDEX idx_connection_password_credentials_type_host
+                     ON connection_password_credentials(connection_type, host);
+                 PRAGMA user_version = 49;",
+            )
+            .expect("v49 credential shape is restored");
+    }
+
+    let upgraded = Storage::open(db_path.clone()).expect("v49 storage upgrades");
+    let credentials = upgraded
+        .list_connection_password_credentials()
+        .expect("credential survives migration");
+    assert_eq!(credentials.len(), 1);
+    assert_eq!(credentials[0].label, "Corp admin");
+    assert_eq!(credentials[0].username, "admin");
+    upgraded
+        .with_connection(|connection| {
+            assert!(!column_exists(
+                connection,
+                "connection_password_credentials",
+                "host",
+            )?);
+            let version: i32 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(to_storage_error)?;
+            assert_eq!(version, SCHEMA_USER_VERSION);
+            Ok(())
+        })
+        .expect("upgraded schema is inspected");
+    drop(upgraded);
+
+    let reopened = Storage::open(db_path).expect("current v50 storage reopens");
+    reopened
+        .with_connection(|connection| {
+            assert!(!column_exists(
+                connection,
+                "connection_password_credentials",
+                "host",
+            )?);
+            Ok(())
+        })
+        .expect("current schema remains host-free");
+}
+
+#[test]
 fn create_connection_can_persist_root_ssh_connection() {
     let storage = Storage::open(temp_db_path("create")).expect("storage opens");
 
@@ -1443,7 +1505,7 @@ fn stored_credential_candidates_include_connection_url_and_widget_metadata() {
 }
 
 #[test]
-fn connection_password_credentials_use_type_host_metadata_and_suffixes() {
+fn connection_password_credentials_use_origin_type_and_connection_name_labels() {
     let storage =
         Storage::open(temp_db_path("connection-password-credentials")).expect("storage opens");
     let first = create_test_ssh_connection(&storage, "Bastion One", "bastion.internal", None);
@@ -1457,14 +1519,13 @@ fn connection_password_credentials_use_type_host_metadata_and_suffixes() {
         .expect("second credential metadata is created");
 
     assert_eq!(first_credential.connection_type, "ssh");
-    assert_eq!(first_credential.host, "bastion.internal");
     assert_eq!(first_credential.username, "admin");
-    assert_eq!(first_credential.label, "admin @ bastion.internal");
-    assert_eq!(second_credential.label, "admin @ bastion.internal #2");
+    assert_eq!(first_credential.label, "Bastion One");
+    assert_eq!(second_credential.label, "Bastion Two");
 }
 
 #[test]
-fn assigning_connection_password_credential_requires_matching_type() {
+fn assigning_connection_password_credential_allows_cross_protocol_reuse() {
     let storage = Storage::open(temp_db_path("connection-password-credential-assign"))
         .expect("storage opens");
     let ssh = create_test_ssh_connection(&storage, "SSH", "ssh.internal", None);
@@ -1472,7 +1533,7 @@ fn assigning_connection_password_credential_requires_matching_type() {
         .create_connection(CreateConnectionRequest {
             name: "RDP".to_string(),
             host: "rdp.internal".to_string(),
-            user: "admin".to_string(),
+            user: "rdp-only-user".to_string(),
             connection_type: "rdp".to_string(),
             folder_id: None,
             port: None,
@@ -1515,15 +1576,14 @@ fn assigning_connection_password_credential_requires_matching_type() {
         assigned.password_credential_id.as_deref(),
         Some(credential.id.as_str())
     );
-
-    let error = match storage.assign_connection_password_credential(rdp.id, credential.id) {
-        Ok(_) => panic!("mismatched credential is rejected"),
-        Err(error) => error,
-    };
+    let assigned = storage
+        .assign_connection_password_credential(rdp.id, credential.id.clone())
+        .expect("the same username and password can be reused for RDP");
     assert_eq!(
-        error,
-        "password credential type must match the connection type"
+        assigned.password_credential_id.as_deref(),
+        Some(credential.id.as_str())
     );
+    assert_eq!(assigned.user, "admin");
 }
 
 #[test]
@@ -1558,31 +1618,37 @@ fn update_connection_password_credential_updates_editable_metadata() {
     let credential = storage
         .create_connection_password_credential_metadata(connection.id.clone(), None)
         .expect("credential metadata is created");
+    storage
+        .assign_connection_password_credential(connection.id.clone(), credential.id.clone())
+        .expect("connection links to the credential");
 
     let updated = storage
         .update_connection_password_credential(
             credential.id.clone(),
             Some(" Corp admins ".to_string()),
             Some(" root ".to_string()),
-            Some(" gateway.internal ".to_string()),
         )
         .expect("credential updates");
     assert_eq!(updated.label, "Corp admins");
     assert_eq!(updated.username, "root");
-    assert_eq!(updated.host, "gateway.internal");
     assert!(updated.updated_at >= credential.updated_at);
+    assert_eq!(
+        storage
+            .get_connection(&connection.id)
+            .expect("linked connection loads")
+            .user,
+        "root"
+    );
 
     let untouched = storage
-        .update_connection_password_credential(credential.id.clone(), None, None, None)
+        .update_connection_password_credential(credential.id.clone(), None, None)
         .expect("empty update keeps existing values");
     assert_eq!(untouched.label, "Corp admins");
     assert_eq!(untouched.username, "root");
-    assert_eq!(untouched.host, "gateway.internal");
 
     let error = match storage.update_connection_password_credential(
         credential.id.clone(),
         Some("  ".to_string()),
-        None,
         None,
     ) {
         Ok(_) => panic!("blank label is rejected"),
@@ -1592,7 +1658,6 @@ fn update_connection_password_credential_updates_editable_metadata() {
 
     let error = match storage.update_connection_password_credential(
         "missing".to_string(),
-        None,
         None,
         None,
     ) {
@@ -1648,45 +1713,30 @@ fn connection_password_credential_usage_counts_and_lists_linked_connections() {
 }
 
 #[test]
-fn standalone_connection_password_credential_allows_blank_host() {
+fn standalone_connection_password_credential_needs_only_label_and_username() {
     let storage = Storage::open(temp_db_path("connection-password-credential-standalone"))
         .expect("storage opens");
 
     let credential = storage
         .create_standalone_connection_password_credential(
-            "ssh".to_string(),
             " Corp shared ".to_string(),
             " admin ".to_string(),
-            None,
         )
         .expect("standalone credential is created");
     assert_eq!(credential.label, "Corp shared");
     assert_eq!(credential.username, "admin");
-    assert_eq!(credential.host, "");
     assert_eq!(credential.created_from_connection_id, None);
     assert_eq!(credential.usage_count, 0);
 
     let error = match storage.create_standalone_connection_password_credential(
-        "ssh".to_string(),
         "  ".to_string(),
         "admin".to_string(),
-        None,
     ) {
         Ok(_) => panic!("blank label is rejected"),
         Err(error) => error,
     };
     assert_eq!(error, "credential label is required");
 
-    let error = match storage.create_standalone_connection_password_credential(
-        "local".to_string(),
-        "Nope".to_string(),
-        "admin".to_string(),
-        None,
-    ) {
-        Ok(_) => panic!("unsupported type is rejected"),
-        Err(error) => error,
-    };
-    assert_eq!(error, "connection type does not support saved passwords");
 }
 
 #[test]
@@ -1698,10 +1748,8 @@ fn merge_connection_password_credentials_relinks_and_removes_sources() {
     let third = create_test_ssh_connection(&storage, "Three", "three.internal", None);
     let target = storage
         .create_standalone_connection_password_credential(
-            "ssh".to_string(),
             "Corp admin".to_string(),
             "admin".to_string(),
-            None,
         )
         .expect("target credential is created");
     let source_a = storage
@@ -1749,20 +1797,28 @@ fn merge_connection_password_credentials_relinks_and_removes_sources() {
 
     let rdp_credential = storage
         .create_standalone_connection_password_credential(
-            "rdp".to_string(),
             "RDP admin".to_string(),
             "admin".to_string(),
-            None,
         )
         .expect("rdp credential is created");
-    let error = match storage.merge_connection_password_credentials(
-        target.id.clone(),
-        vec![rdp_credential.id.clone()],
-    ) {
-        Ok(_) => panic!("type mismatch is rejected"),
-        Err(error) => error,
-    };
-    assert_eq!(error, "password credential types must match to merge");
+    storage
+        .with_connection(|database| {
+            database
+                .execute(
+                    "UPDATE connection_password_credentials SET connection_type = 'rdp' WHERE id = ?1",
+                    params![&rdp_credential.id],
+                )
+                .map(|_| ())
+                .map_err(to_storage_error)
+        })
+        .expect("legacy origin metadata is changed to RDP");
+    let relinked = storage
+        .merge_connection_password_credentials(
+            target.id.clone(),
+            vec![rdp_credential.id.clone()],
+        )
+        .expect("credentials created from different protocols can be merged");
+    assert_eq!(relinked, 0);
 
     let third_credential = storage
         .create_connection_password_credential_metadata(third.id.clone(), None)
@@ -1780,10 +1836,8 @@ fn merge_connection_password_credentials_rolls_back_relinks_when_delete_fails() 
     let connection = create_test_ssh_connection(&storage, "One", "one.internal", None);
     let target = storage
         .create_standalone_connection_password_credential(
-            "ssh".to_string(),
             "Target".to_string(),
             "admin".to_string(),
-            None,
         )
         .expect("target credential is created");
     let source = storage
@@ -1828,54 +1882,42 @@ fn merge_connection_password_credentials_rolls_back_relinks_when_delete_fails() 
 }
 
 #[test]
-fn find_reusable_connection_password_credentials_matches_username_prefers_same_host() {
+fn find_reusable_connection_password_credentials_matches_username_across_hosts() {
     let storage = Storage::open(temp_db_path("connection-password-credential-reuse"))
         .expect("storage opens");
     let bastion = create_test_ssh_connection(&storage, "Bastion", "bastion.internal", None);
     let other = create_test_ssh_connection(&storage, "Other", "other.internal", None);
     let _different_user = storage
         .create_standalone_connection_password_credential(
-            "ssh".to_string(),
             "Someone else".to_string(),
             "root".to_string(),
-            Some("other.internal".to_string()),
         )
         .expect("other-user credential is created");
     let same_user_other_host = storage
         .create_standalone_connection_password_credential(
-            "ssh".to_string(),
             "Admin elsewhere".to_string(),
             "admin".to_string(),
-            Some("other.internal".to_string()),
         )
-        .expect("other-host credential is created");
-    let same_user_same_host = storage
+        .expect("same-user credential is created");
+    let same_user_from_connection = storage
         .create_connection_password_credential_metadata(bastion.id.clone(), None)
-        .expect("same-host credential is created");
+        .expect("connection credential is created");
 
     let reusable = storage
         .find_reusable_connection_password_credentials(other.id.clone())
         .expect("reusable lookup");
     let ids: Vec<&str> = reusable.iter().map(|entry| entry.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        vec![
-            same_user_other_host.id.as_str(),
-            same_user_same_host.id.as_str()
-        ]
-    );
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&same_user_other_host.id.as_str()));
+    assert!(ids.contains(&same_user_from_connection.id.as_str()));
 
     let reusable = storage
         .find_reusable_connection_password_credentials(bastion.id.clone())
-        .expect("reusable lookup prefers same host");
+        .expect("reusable lookup ignores host");
     let ids: Vec<&str> = reusable.iter().map(|entry| entry.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        vec![
-            same_user_same_host.id.as_str(),
-            same_user_other_host.id.as_str()
-        ]
-    );
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&same_user_other_host.id.as_str()));
+    assert!(ids.contains(&same_user_from_connection.id.as_str()));
 }
 
 #[test]

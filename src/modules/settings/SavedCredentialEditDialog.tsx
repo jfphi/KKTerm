@@ -5,43 +5,30 @@ import {
   Btn,
   DialogShell,
   Field,
-  Select,
   Sheet,
   TextInput,
 } from "../../app/ui/dialog";
 import { invokeCommand } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
-import { connectionTypeLabel } from "../workspace/connections/utils";
-import type {
-  ConnectionPasswordCredentialEntry,
-  ConnectionType,
-} from "../../types";
-
-const SAVED_CREDENTIAL_TYPES: readonly ConnectionType[] = ["ssh", "telnet", "rdp", "vnc", "ftp"];
+import type { ConnectionPasswordCredentialEntry } from "../../types";
 
 export type SavedCredentialEditDraft = {
   label: string;
-  connectionType: ConnectionType;
   username: string;
-  host: string;
   password: string;
 };
 
 function draftFromCredential(credential: ConnectionPasswordCredentialEntry): SavedCredentialEditDraft {
   return {
     label: credential.label,
-    connectionType: credential.connectionType,
     username: credential.username,
-    host: credential.host,
     password: "",
   };
 }
 
 const EMPTY_DRAFT: SavedCredentialEditDraft = {
   label: "",
-  connectionType: "ssh",
   username: "",
-  host: "",
   password: "",
 };
 
@@ -84,17 +71,14 @@ export function SavedCredentialEditDialog({
             credentialId: credential.id,
             label: draft.label,
             username: draft.username,
-            host: draft.host,
             secret: draft.password || undefined,
           },
         });
       } else {
         await invokeCommand("create_standalone_connection_password_credential", {
           request: {
-            connectionType: draft.connectionType,
             label: draft.label,
             username: draft.username,
-            host: draft.host || undefined,
             secret: draft.password,
           },
         });
@@ -137,37 +121,10 @@ export function SavedCredentialEditDialog({
             placeholder={t("settings.savedCredentialNamePlaceholder")}
           />
         </Field>
-        {isEdit && credential ? (
-          <Field label={t("connections.type")}>
-            <TextInput value={connectionTypeLabel(credential.connectionType)} disabled />
-          </Field>
-        ) : (
-          <Field label={t("connections.type")}>
-            <Select
-              value={draft.connectionType}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  connectionType: event.currentTarget.value as ConnectionType,
-                }))
-              }
-              options={SAVED_CREDENTIAL_TYPES.map((type) => ({
-                value: type,
-                label: connectionTypeLabel(type),
-              }))}
-            />
-          </Field>
-        )}
         <Field label={t("settings.savedCredentialUsername")}>
           <TextInput
             value={draft.username}
             onChange={(event) => setDraft((current) => ({ ...current, username: event.currentTarget.value }))}
-          />
-        </Field>
-        <Field label={t("connections.host")} hint={t("settings.savedCredentialHostHint")}>
-          <TextInput
-            value={draft.host}
-            onChange={(event) => setDraft((current) => ({ ...current, host: event.currentTarget.value }))}
           />
         </Field>
         <Field

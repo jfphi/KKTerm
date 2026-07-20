@@ -30,19 +30,15 @@ export function SavedCredentialConvertDialog({
 }) {
   const { t } = useTranslation();
   const showStatusBarNotice = useWorkspaceStore((state) => state.showStatusBarNotice);
-  const sameTypeCredentials = useMemo(
-    () =>
-      credentials.filter(
-        (credential) =>
-          credential.connectionType === legacy.connectionType && credential.secretExists,
-      ),
-    [credentials, legacy.connectionType],
+  const reusableCredentials = useMemo(
+    () => credentials.filter((credential) => credential.secretExists),
+    [credentials],
   );
   const [mode, setMode] = useState<"existing" | "new">(
-    sameTypeCredentials.length > 0 ? "existing" : "new",
+    reusableCredentials.length > 0 ? "existing" : "new",
   );
   const [selectedCredentialId, setSelectedCredentialId] = useState(
-    sameTypeCredentials[0]?.id ?? "",
+    reusableCredentials[0]?.id ?? "",
   );
   const [label, setLabel] = useState(
     legacy.username?.trim()
@@ -96,7 +92,7 @@ export function SavedCredentialConvertDialog({
         }
       >
         <p className="kk-hint">{t("settings.savedCredentialConvertHint", { name: legacy.label })}</p>
-        {sameTypeCredentials.length > 0 ? (
+        {reusableCredentials.length > 0 ? (
           <label className="settings-credential-usage-row">
             <input
               checked={mode === "existing"}
@@ -110,12 +106,12 @@ export function SavedCredentialConvertDialog({
             </div>
           </label>
         ) : null}
-        {mode === "existing" && sameTypeCredentials.length > 0 ? (
+        {mode === "existing" && reusableCredentials.length > 0 ? (
           <Field label={t("settings.savedCredentials")}>
             <Select
               value={selectedCredentialId}
               onChange={(event) => setSelectedCredentialId(event.currentTarget.value)}
-              options={sameTypeCredentials.map((credential) => ({
+              options={reusableCredentials.map((credential) => ({
                 value: credential.id,
                 label: credential.label,
               }))}

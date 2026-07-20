@@ -80,7 +80,6 @@ export function SavedCredentialMergeDialog({
                 <strong>{credential.label}</strong>
                 <span>
                   {credential.username}
-                  {credential.host ? ` @ ${credential.host}` : ""}
                   {" · "}
                   {t("settings.savedCredentialUsedBy", { count: credential.usageCount })}
                   {credential.secretExists ? "" : ` · ${t("settings.credentialMissingSecret")}`}

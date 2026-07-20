@@ -4548,9 +4548,9 @@ function ConnectionDialog({
         (credential) =>
           credential.kind === "connectionPassword" &&
           credential.exists &&
-          credential.connectionType === connectionType,
+          credential.metadataSource === "connectionPasswordCredentials",
       ),
-    [connectionType, passwordCredentials],
+    [passwordCredentials],
   );
   const usesTwoColumnOptions =
     connectionType === "ssh" ||
