@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "将鼠标光标绘制到新截图中。",
     "screenshotsShortcuts": "全局截图快捷键",
     "screenshotsShortcutsHint": "这些快捷键在 KKTerm 运行期间全局有效,包括隐藏到托盘时。",
+    "screenshotsEditorShortcuts": "截图编辑器",
+    "screenshotsEditorShortcutsHint": "这些快捷键在截图编辑器打开时有效。",
     "screenshotsSaved": "截图设置已保存。",
     "sectionAbout": "关于",
     "generalDefaults": "工作区默认值",

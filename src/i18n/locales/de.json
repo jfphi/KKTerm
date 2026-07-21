@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "Zeichnet den Mauszeiger in neue Aufnahmen ein.",
     "screenshotsShortcuts": "Globale Aufnahme-Tastenkürzel",
     "screenshotsShortcutsHint": "Diese Tastenkürzel funktionieren systemweit, solange KKTerm läuft – auch wenn es im Infobereich ausgeblendet ist.",
+    "screenshotsEditorShortcuts": "Screenshot-Editor",
+    "screenshotsEditorShortcutsHint": "Diese Tastenkürzel funktionieren, während der Screenshot-Editor geöffnet ist.",
     "screenshotsSaved": "Screenshot-Einstellungen gespeichert.",
     "sectionAbout": "Über",
     "generalDefaults": "Arbeitsbereich-Standards",

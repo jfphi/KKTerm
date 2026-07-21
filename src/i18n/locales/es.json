@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "Dibuja el puntero del ratón en las nuevas capturas.",
     "screenshotsShortcuts": "Atajos globales de captura",
     "screenshotsShortcutsHint": "Estos atajos funcionan en todo el sistema mientras KKTerm está en ejecución, incluso oculto en la bandeja.",
+    "screenshotsEditorShortcuts": "Editor de capturas",
+    "screenshotsEditorShortcutsHint": "Estos atajos funcionan mientras el editor de capturas está abierto.",
     "screenshotsSaved": "Configuración de capturas guardada.",
     "sectionAbout": "Acerca de",
     "generalDefaults": "Valores predeterminados del espacio de trabajo",
