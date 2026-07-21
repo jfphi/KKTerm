@@ -4247,6 +4247,21 @@ export async function selectPngSavePath(defaultFilename: string, title: string) 
   return typeof path === "string" && path ? path : null;
 }
 
+export async function selectScreenshotSavePath(defaultPath: string, title: string) {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const path = await saveDialog({
+    defaultPath,
+    filters: [
+      { name: i18next.t("settings.screenshotsFormatPng"), extensions: ["png"] },
+      { name: i18next.t("settings.screenshotsFormatJpeg"), extensions: ["jpg", "jpeg"] },
+    ],
+    title,
+  });
+  return typeof path === "string" && path ? path : null;
+}
+
 export async function writeDataUrlFile(path: string, dataUrl: string) {
   const encoded = dataUrl.split(",", 2)[1];
   if (!encoded || !dataUrl.startsWith("data:")) {

@@ -748,6 +748,11 @@
   overflow: hidden;
 }
 
+.screenshots-editor__stage.is-crop {
+  cursor: crosshair;
+  touch-action: none;
+}
+
 .screenshots-editor__canvas-wrap {
   display: grid;
   box-sizing: border-box;
@@ -792,6 +797,15 @@
 
 .screenshots-editor__canvas-wrap canvas.is-text {
   cursor: text;
+}
+
+.screenshots-editor__crop-selection {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px dashed var(--accent);
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 38%);
+  pointer-events: none;
 }
 
 .screenshots-editor__selection {

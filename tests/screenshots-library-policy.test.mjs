@@ -49,11 +49,12 @@ test("capture delay and selection-based batch actions stay connected", async () 
 });
 
 test("unified screenshot dialog follows the Sheet contract and bounds image zoom", async () => {
-  const [editor, page, styles, backend] = await Promise.all([
+  const [editor, page, styles, backend, bridge] = await Promise.all([
     read("src/modules/screenshots/ScreenshotEditor.tsx"),
     read("src/modules/screenshots/ScreenshotsPage.tsx"),
     read("src/modules/screenshots/screenshots.css"),
     read("src-tauri/src/screenshot.rs"),
+    read("src/lib/tauri.ts"),
   ]);
 
   for (const tool of ["pan", "select", "pencil", "arrow", "rectangle", "ellipse", "text", "mosaic", "crop"]) {
@@ -67,6 +68,10 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
   assert.match(editor, /tool === "pencil"[\s\S]*?freehandRef\.current/);
   assert.match(editor, /function applyCrop\(/);
   assert.match(editor, /cropRectRef\.current/);
+  assert.match(editor, /tool === "crop" \? " is-crop"/);
+  assert.match(editor, /onPointerDown=\{cropPointerDown\}/);
+  assert.match(editor, /onPointerMove=\{cropPointerMove\}/);
+  assert.match(editor, /cropImagePlacement\(source, base\.width, base\.height\)/);
   assert.match(editor, /stage\.scrollLeft = pan\.scrollLeft/);
   assert.match(editor, /stage\.scrollTop = pan\.scrollTop/);
   assert.match(editor, /<Sheet/);
@@ -110,9 +115,13 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
   assert.match(editor, /MultipleFloppy/);
   assert.match(page, /write_screenshot_data_url_to_clipboard/);
   assert.match(editor, /screenshots\.editor\.saveAs/);
-  assert.match(editor, /save\("overwrite"/);
-  assert.match(editor, /save\("copy"/);
-  assert.match(editor, /saveAsCopy: mode === "copy"/);
+  assert.match(editor, /void save\(\)/);
+  assert.match(editor, /selectScreenshotSavePath/);
+  assert.match(editor, /writeDataUrlFile/);
+  assert.match(editor, /toDataURL\("image\/jpeg", 0\.9\)/);
+  assert.match(editor, /void saveAs\(\)/);
+  assert.match(editor, /saveAsCopy: false/);
+  assert.match(bridge, /function selectScreenshotSavePath[\s\S]*extensions: \["png"\][\s\S]*extensions: \["jpg", "jpeg"\]/);
   assert.match(backend, /if request\.save_as_copy/);
 });
 

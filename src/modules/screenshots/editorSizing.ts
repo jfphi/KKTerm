@@ -13,3 +13,21 @@ export function fitImageDimensions(
     height: Math.max(1, Math.floor(imageHeight * scale)),
   };
 }
+
+export type ImageRect = { x: number; y: number; width: number; height: number };
+
+export function cropImagePlacement(crop: ImageRect, imageWidth: number, imageHeight: number) {
+  const left = Math.max(0, crop.x);
+  const top = Math.max(0, crop.y);
+  const right = Math.min(imageWidth, crop.x + crop.width);
+  const bottom = Math.min(imageHeight, crop.y + crop.height);
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  const width = right - left;
+  const height = bottom - top;
+  return {
+    source: { x: left, y: top, width, height },
+    destination: { x: left - crop.x, y: top - crop.y, width, height },
+  };
+}

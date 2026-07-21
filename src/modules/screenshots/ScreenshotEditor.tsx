@@ -42,9 +42,15 @@ import {
   showNativeContextMenu,
   type NativeContextMenuItem,
 } from "../../lib/nativeContextMenu";
-import { invokeCommand, type FullScreenshot, type StoredScreenshot } from "../../lib/tauri";
+import {
+  invokeCommand,
+  selectScreenshotSavePath,
+  writeDataUrlFile,
+  type FullScreenshot,
+  type StoredScreenshot,
+} from "../../lib/tauri";
 import { formatScreenshotBytes } from "./LibraryView";
-import { fitImageDimensions } from "./editorSizing";
+import { cropImagePlacement, fitImageDimensions } from "./editorSizing";
 
 type EditorTool = "pan" | "select" | "pencil" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic" | "crop";
 type ShapeKind = "arrow" | "rectangle" | "ellipse";
@@ -53,7 +59,6 @@ type Rect = { x: number; y: number; width: number; height: number };
 type ZoomLevel = "fit" | number;
 type TextFont = "app" | "sans-serif" | "serif" | "monospace";
 type PendingEditorAction = "close" | -1 | 1;
-type EditorSaveMode = "overwrite" | "copy";
 
 type ShapeAnnotation = {
   id: number;
@@ -183,12 +188,40 @@ function normalizedRect(start: Point, end: Point): Rect {
   };
 }
 
-function clampCropRect(rect: Rect, width: number, height: number): Rect {
-  const x = Math.max(0, Math.min(width - 1, Math.floor(rect.x)));
-  const y = Math.max(0, Math.min(height - 1, Math.floor(rect.y)));
-  const right = Math.max(x + 1, Math.min(width, Math.ceil(rect.x + rect.width)));
-  const bottom = Math.max(y + 1, Math.min(height, Math.ceil(rect.y + rect.height)));
+function pixelCropRect(rect: Rect): Rect {
+  const x = Math.floor(rect.x);
+  const y = Math.floor(rect.y);
+  const right = Math.ceil(rect.x + rect.width);
+  const bottom = Math.ceil(rect.y + rect.height);
   return { x, y, width: right - x, height: bottom - y };
+}
+
+function suggestedSaveAsPath(path: string) {
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const dot = path.lastIndexOf(".");
+  const stem = dot > separator ? path.slice(0, dot) : path;
+  return `${stem}-edited`;
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[/\\]/).pop() ?? path;
+}
+
+function saveAsDataUrl(canvas: HTMLCanvasElement, path: string) {
+  if (!/\.jpe?g$/i.test(path)) {
+    return canvas.toDataURL("image/png");
+  }
+  const jpeg = document.createElement("canvas");
+  jpeg.width = canvas.width;
+  jpeg.height = canvas.height;
+  const context = jpeg.getContext("2d");
+  if (!context) {
+    return canvas.toDataURL("image/jpeg", 0.9);
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, jpeg.width, jpeg.height);
+  context.drawImage(canvas, 0, 0);
+  return jpeg.toDataURL("image/jpeg", 0.9);
 }
 
 function rectsIntersect(a: Rect, b: Rect) {
@@ -544,6 +577,7 @@ export function ScreenshotEditor({
   onReveal,
   onDelete,
   onSaved,
+  onExported,
   onError,
   onClose,
 }: {
@@ -555,7 +589,8 @@ export function ScreenshotEditor({
   onOpenExternal: () => void;
   onReveal: () => void;
   onDelete: () => void;
-  onSaved: (saved: StoredScreenshot, mode: EditorSaveMode, navigateDirection?: -1 | 1) => void;
+  onSaved: (saved: StoredScreenshot, navigateDirection?: -1 | 1) => void;
+  onExported: (fileName: string) => void;
   onError: (error: unknown) => void;
   onClose: () => void;
 }) {
@@ -569,6 +604,7 @@ export function ScreenshotEditor({
   const editingRef = useRef<TextDraft | null>(null);
   const idRef = useRef(1);
   const drawingRef = useRef<{ start: Point } | null>(null);
+  const cropDragRef = useRef<{ pointerId: number; start: Point; end: Point } | null>(null);
   const freehandRef = useRef<{ pointerId: number; points: Point[] } | null>(null);
   const moveDragRef = useRef<{
     pointerId: number;
@@ -604,6 +640,7 @@ export function ScreenshotEditor({
   const [stroke, setStroke] = useState<number>(STROKE_OPTIONS[1].width);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [cropRect, setCropRect] = useState<Rect | null>(null);
+  const [cropDraft, setCropDraft] = useState<Rect | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<TextDraft | null>(null);
   const [textSize, setTextSize] = useState(32);
@@ -650,16 +687,20 @@ export function ScreenshotEditor({
     }
     const source = cropRectRef.current ?? { x: 0, y: 0, width: base.width, height: base.height };
     context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    const placement = cropImagePlacement(source, base.width, base.height);
+    if (!placement) {
+      return;
+    }
     context.drawImage(
       base,
-      source.x,
-      source.y,
-      source.width,
-      source.height,
-      0,
-      0,
-      context.canvas.width,
-      context.canvas.height,
+      placement.source.x,
+      placement.source.y,
+      placement.source.width,
+      placement.source.height,
+      placement.destination.x,
+      placement.destination.y,
+      placement.destination.width,
+      placement.destination.height,
     );
   }
 
@@ -694,6 +735,8 @@ export function ScreenshotEditor({
     editingRef.current = null;
     setEditing(null);
     drawingRef.current = null;
+    cropDragRef.current = null;
+    setCropDraft(null);
     freehandRef.current = null;
     moveDragRef.current = null;
     handleDragRef.current = null;
@@ -784,8 +827,8 @@ export function ScreenshotEditor({
     if (!canvas || !base || !context) {
       return;
     }
-    const crop = clampCropRect(requested, canvas.width, canvas.height);
-    if (crop.width < 2 || crop.height < 2) {
+    const crop = pixelCropRect(requested);
+    if (crop.width < 2 || crop.height < 2 || !cropImagePlacement(crop, canvas.width, canvas.height)) {
       renderCanvas();
       return;
     }
@@ -1089,6 +1132,9 @@ export function ScreenshotEditor({
     if (!context || !ready || event.button !== 0) {
       return;
     }
+    if (tool === "crop") {
+      return;
+    }
     if (tool === "pan") {
       const stage = stageRef.current;
       if (!stage) {
@@ -1148,6 +1194,9 @@ export function ScreenshotEditor({
   }
 
   function pointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (tool === "crop") {
+      return;
+    }
     if (tool === "pan") {
       const pan = panRef.current;
       const stage = stageRef.current;
@@ -1200,20 +1249,11 @@ export function ScreenshotEditor({
     }
     const end = canvasPoint(canvas, event.clientX, event.clientY);
     renderCanvas();
-    if (tool === "mosaic" || tool === "crop") {
+    if (tool === "mosaic") {
       const cssPixel = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
       const rect = normalizedRect(drawing.start, end);
       context.save();
-      if (tool === "crop") {
-        context.fillStyle = "rgba(0, 0, 0, 0.38)";
-        context.fillRect(0, 0, canvas.width, rect.y);
-        context.fillRect(0, rect.y, rect.x, rect.height);
-        context.fillRect(rect.x + rect.width, rect.y, canvas.width - rect.x - rect.width, rect.height);
-        context.fillRect(0, rect.y + rect.height, canvas.width, canvas.height - rect.y - rect.height);
-        context.strokeStyle = cssToken("--accent", "#0a84ff");
-      } else {
-        context.strokeStyle = "rgba(127, 127, 127, 0.9)";
-      }
+      context.strokeStyle = "rgba(127, 127, 127, 0.9)";
       context.lineWidth = cssPixel;
       context.setLineDash([6 * cssPixel, 4 * cssPixel]);
       context.strokeRect(rect.x, rect.y, rect.width, rect.height);
@@ -1224,6 +1264,9 @@ export function ScreenshotEditor({
   }
 
   function pointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (tool === "crop") {
+      return;
+    }
     if (tool === "pan") {
       if (panRef.current?.pointerId === event.pointerId) {
         panRef.current = null;
@@ -1285,10 +1328,6 @@ export function ScreenshotEditor({
       renderCanvas();
       return;
     }
-    if (tool === "crop") {
-      applyCrop(rect);
-      return;
-    }
     const before = annotationsRef.current;
     pushUndo(before);
     if (tool === "mosaic") {
@@ -1314,6 +1353,52 @@ export function ScreenshotEditor({
     moveDragRef.current = null;
     panRef.current = null;
     renderCanvas();
+  }
+
+  function cropPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const canvas = canvasRef.current;
+    if (tool !== "crop" || !canvas || !ready || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = canvasPoint(canvas, event.clientX, event.clientY);
+    cropDragRef.current = { pointerId: event.pointerId, start: point, end: point };
+    setCropDraft(normalizedRect(point, point));
+  }
+
+  function cropPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = cropDragRef.current;
+    const canvas = canvasRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !canvas) {
+      return;
+    }
+    drag.end = canvasPoint(canvas, event.clientX, event.clientY);
+    setCropDraft(normalizedRect(drag.start, drag.end));
+  }
+
+  function cropPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = cropDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    cropDragRef.current = null;
+    setCropDraft(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    applyCrop(normalizedRect(drag.start, drag.end));
+  }
+
+  function cropPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (cropDragRef.current?.pointerId !== event.pointerId) {
+      return;
+    }
+    cropDragRef.current = null;
+    setCropDraft(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   }
 
   function canvasDoubleClick(event: ReactMouseEvent<HTMLCanvasElement>) {
@@ -1407,12 +1492,36 @@ export function ScreenshotEditor({
     onCopyEdited(exportComposite().toDataURL("image/png"));
   }
 
-  async function save(mode: EditorSaveMode, navigateDirection?: -1 | 1) {
+  async function saveAs() {
     if (!canvasRef.current || !ready || saving) {
       return;
     }
     commitTextDraft();
-    if (mode === "overwrite" && annotationsRef.current.length === 0 && cropRectRef.current === null) {
+    try {
+      const path = await selectScreenshotSavePath(
+        suggestedSaveAsPath(screenshot.path),
+        t("screenshots.editor.saveAs"),
+      );
+      if (!path) {
+        return;
+      }
+      setSaving(true);
+      const flattened = exportComposite();
+      await writeDataUrlFile(path, saveAsDataUrl(flattened, path));
+      setSaving(false);
+      onExported(fileNameFromPath(path));
+    } catch (error) {
+      setSaving(false);
+      onError(error);
+    }
+  }
+
+  async function save(navigateDirection?: -1 | 1) {
+    if (!canvasRef.current || !ready || saving) {
+      return;
+    }
+    commitTextDraft();
+    if (annotationsRef.current.length === 0 && cropRectRef.current === null) {
       return;
     }
     setSaving(true);
@@ -1422,7 +1531,7 @@ export function ScreenshotEditor({
         request: {
           id: screenshot.id,
           dataUrl: flattened.toDataURL("image/png"),
-          saveAsCopy: mode === "copy",
+          saveAsCopy: false,
         },
       });
       const savedBase = document.createElement("canvas");
@@ -1437,7 +1546,7 @@ export function ScreenshotEditor({
       setSelectedId(null);
       renderCanvas();
       setSaving(false);
-      onSaved(created, mode, navigateDirection);
+      onSaved(created, navigateDirection);
     } catch (error) {
       setSaving(false);
       onError(error);
@@ -1508,6 +1617,12 @@ export function ScreenshotEditor({
   const displayWidth = scaledWidth ?? fitSize?.width ?? null;
   const displayHeight = scaledHeight ?? fitSize?.height ?? null;
   const displayScale = displayWidth ? displayWidth / Math.max(1, canvasSize.width) : null;
+  const cropDraftStyle = cropDraft && displayScale ? {
+    left: cropDraft.x * displayScale,
+    top: cropDraft.y * displayScale,
+    width: cropDraft.width * displayScale,
+    height: cropDraft.height * displayScale,
+  } : null;
 
   const measureContext = ready ? canvasRef.current?.getContext("2d") ?? null : null;
   let selectionBox: { left: number; top: number; width: number; height: number } | null = null;
@@ -1643,7 +1758,7 @@ export function ScreenshotEditor({
                 title={t("common.save")}
                 aria-label={t("common.save")}
                 disabled={!ready || !dirty || saving}
-                onClick={() => void save("overwrite")}
+                onClick={() => void save()}
               >
                 <Floppy size={15} aria-hidden="true" />
               </button>
@@ -1652,7 +1767,7 @@ export function ScreenshotEditor({
                 title={t("screenshots.editor.saveAs")}
                 aria-label={t("screenshots.editor.saveAs")}
                 disabled={!ready || saving}
-                onClick={() => void save("copy")}
+                onClick={() => void saveAs()}
               >
                 <MultipleFloppy />
               </button>
@@ -1813,7 +1928,11 @@ export function ScreenshotEditor({
           </div>
           <div
             ref={stageRef}
-            className={`screenshots-editor__stage${zoom === "fit" ? " is-fit" : ""}`}
+            className={`screenshots-editor__stage${zoom === "fit" ? " is-fit" : ""}${tool === "crop" ? " is-crop" : ""}`}
+            onPointerDown={cropPointerDown}
+            onPointerMove={cropPointerMove}
+            onPointerUp={cropPointerUp}
+            onPointerCancel={cropPointerCancel}
           >
             <div
               className={`screenshots-editor__canvas-wrap${zoom === "fit" ? " is-fit" : ""}`}
@@ -1840,6 +1959,9 @@ export function ScreenshotEditor({
                   onDoubleClick={canvasDoubleClick}
                   onContextMenu={canvasContextMenu}
                 />
+                {cropDraftStyle ? (
+                  <div className="screenshots-editor__crop-selection" style={cropDraftStyle} />
+                ) : null}
                 {selectionBox ? (
                   <div
                     className="screenshots-editor__selection"
@@ -1961,7 +2083,7 @@ export function ScreenshotEditor({
           onConfirm={() => {
             const navigateDirection = typeof pendingAction === "number" ? pendingAction : undefined;
             setPendingAction(null);
-            void save("overwrite", navigateDirection);
+            void save(navigateDirection);
           }}
           onCancel={() => setPendingAction(null)}
           zClassName="kk-qc-subdialog"
