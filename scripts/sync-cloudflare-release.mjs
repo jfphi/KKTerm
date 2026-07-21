@@ -129,6 +129,18 @@ export async function main(argv = process.argv.slice(2)) {
     ]),
   );
   const release = normalizeRelease(raw);
+  if (release.draft || release.prerelease) {
+    // Draft and prerelease tags must never touch the stable public manifest, so
+    // there is nothing to mirror. Skip cleanly (exit 0) instead of letting
+    // buildReleaseManifest throw — otherwise every prerelease publish leaves a
+    // red X on the mirror workflow via the `release: published` event and the
+    // dispatches the macOS/Linux release scripts fire.
+    console.log(
+      `${options.tag} is a ${release.draft ? "draft" : "prerelease"} release; ` +
+        "leaving the stable Cloudflare manifest untouched.",
+    );
+    return;
+  }
   const plan = buildUploadPlan(release);
   if (options.dryRun) {
     process.stdout.write(`${JSON.stringify({ tag: options.tag, uploads: plan }, null, 2)}\n`);
