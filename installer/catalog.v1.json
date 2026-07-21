@@ -432,6 +432,7 @@
         "id": "astral-sh.uv"
       },
       "options": [
+        "provider",
         "version"
       ],
       "descriptionLocales": {
@@ -448,6 +449,10 @@
         "ko": "Astral의 빠른 Python 패키지 및 프로젝트 관리자. 필요에 따라 Python 자체를 설치할 수 있습니다.",
         "id": "Paket Python cepat dan manajer proyek dari Astral. Dapat menginstal Python sendiri sesuai permintaan.",
         "vi": "Trình quản lý dự án và gói Python nhanh từ Astral. Có thể tự cài đặt Python theo yêu cầu."
+      },
+      "chocolateyProvider": {
+        "kind": "chocolatey",
+        "id": "uv"
       }
     },
     {

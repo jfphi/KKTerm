@@ -53,4 +53,9 @@ test("new install dialogs only preselect Chocolatey when both package providers 
     /useWorkspaceStore\([\s\S]*state\.generalSettings\.installerDefaultProvider/,
     "InstallerToolDialog should read the persisted default provider from general settings.",
   );
+  assert.match(
+    dialogSource,
+    /preferredProvider === "chocolatey" && recipe\.provider\.kind === "bundle"[\s\S]*return \{ provider: "chocolatey" \}/,
+    "Bundle dialogs should forward the Chocolatey preference to their step recipes.",
+  );
 });

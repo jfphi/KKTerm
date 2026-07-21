@@ -22,6 +22,9 @@ const latestVersionSource = await readFile(
   new URL("../src-tauri/src/installer/latest_version.rs", import.meta.url),
   "utf8",
 );
+const catalog = JSON.parse(
+  await readFile(new URL("../installer/catalog.v1.json", import.meta.url), "utf8"),
+);
 
 test("Chocolatey provider selection opens Chocolatey install dialog when missing", () => {
   assert.match(
@@ -114,6 +117,21 @@ test("Chocolatey-backed plans depend on Chocolatey instead of the recipe's winge
     dagSource,
     /id !== targetRecipeId && detected\[id\]\?\.installed[\s\S]*order\.push\(recipe\)/,
     "Already-installed prerequisites should satisfy their own dependency chain.",
+  );
+  assert.match(
+    dagSource,
+    /case "bundle":[\s\S]*estimateUacPromptsFor\(\s*stepRecipe,\s*options,/,
+    "Bundle UAC estimates should honor the selected provider passed to bundle steps.",
+  );
+});
+
+test("uv exposes a Chocolatey provider for Python bundle step installs", () => {
+  const uv = catalog.recipes.find((recipe) => recipe.id === "uv");
+  assert.ok(uv, "catalog should include uv");
+  assert.deepEqual(uv.chocolateyProvider, { kind: "chocolatey", id: "uv" });
+  assert.ok(
+    uv.options.includes("provider"),
+    "uv should show and accept provider selection so the Python bundle can forward Chocolatey.",
   );
 });
 
