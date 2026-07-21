@@ -2157,6 +2157,8 @@
     "segmentDesc_itops": "Site, phòng máy chủ, rack, máy chủ, tác vụ, tự động hóa và lịch sử chạy.",
     "segment_assistant": "Trợ lý AI",
     "segmentDesc_assistant": "Lịch sử trò chuyện và bộ nhớ của Trợ lý AI.",
+    "segment_workspacesConnections": "Không gian làm việc và kết nối",
+    "segmentDesc_workspacesConnections": "Danh sách không gian làm việc cùng các kết nối, thư mục và thẻ bên trong. Mật khẩu chỉ được kèm theo khi chọn ở bên dưới.",
     "segment_credentials": "Mật khẩu",
     "aiProvider": "AI provider",
     "provider": "Provider",

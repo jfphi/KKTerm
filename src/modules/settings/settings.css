@@ -2056,6 +2056,23 @@ input.settings-credential-search {
   min-width: 0;
 }
 
+/* Per-Connection (legacy) passwords reuse the saved-credential table, but drop
+   the checkbox/usage columns and carry an inline Convert action per row. */
+.settings-saved-credential-grid.is-legacy .settings-saved-credential-grid-header,
+.settings-saved-credential-grid.is-legacy .settings-saved-credential-grid-row {
+  grid-template-columns:
+    minmax(120px, 1fr) minmax(140px, 1.3fr) minmax(90px, 0.8fr) minmax(150px, auto);
+  min-width: 500px;
+}
+
+.settings-saved-credential-grid-actions.is-legacy {
+  gap: 8px;
+}
+
+.settings-saved-credential-grid-actions.is-legacy .secondary-button {
+  white-space: nowrap;
+}
+
 .settings-credential-usage {
   display: grid;
   gap: 8px;

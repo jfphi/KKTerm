@@ -2157,6 +2157,8 @@
     "segmentDesc_itops": "Sites, Serverräume, Racks, Hosts, Tasks, Automationen und Ausführungsverlauf.",
     "segment_assistant": "KI-Assistent",
     "segmentDesc_assistant": "Chatverlauf und Erinnerungen des KI-Assistenten.",
+    "segment_workspacesConnections": "Arbeitsbereiche und Verbindungen",
+    "segmentDesc_workspacesConnections": "Liste der Arbeitsbereiche samt der darin enthaltenen Verbindungen, Ordner und Tags. Passwörter nur, wenn unten eingeschlossen.",
     "segment_credentials": "Passwörter",
     "aiProvider": "KI-Anbieter",
     "provider": "Anbieter",

@@ -2157,6 +2157,8 @@
     "segmentDesc_itops": "站点、机房、机架、主机、任务、自动化和运行历史。",
     "segment_assistant": "AI 助手",
     "segmentDesc_assistant": "AI 助手的聊天记录和记忆。",
+    "segment_workspacesConnections": "工作区和连接",
+    "segmentDesc_workspacesConnections": "工作区列表及其中的连接、文件夹和标签。密码仅在下方选择包含时才会随附。",
     "segment_credentials": "密码",
     "aiProvider": "AI 提供者",
     "provider": "提供者",

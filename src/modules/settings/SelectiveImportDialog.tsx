@@ -10,22 +10,12 @@ import {
   Select,
   Sheet,
   TextInput,
-  type DialogIconName,
 } from "../../app/ui/dialog";
 import { useDashboardStore } from "../dashboard/state/dashboardStore";
 import { invokeCommand, selectSettingsBackupImportFile } from "../../lib/tauri";
 import type { SelectiveManifest } from "../../types";
 import { useWorkspaceStore } from "../../store";
-
-const SEGMENT_ICONS: Record<string, DialogIconName> = {
-  connections: "server",
-  workspaces: "package",
-  dashboards: "dashboard",
-  settings: "gear",
-  mcpServers: "cloud",
-  itops: "network",
-  assistant: "bot",
-};
+import { EXPORT_GROUPS } from "./SelectiveExportDialog";
 
 type SegmentAction = "skip" | "add" | "replace";
 type ImportKind = "selective" | "full";
@@ -104,9 +94,11 @@ export function SelectiveImportDialog({
         setBusy(false);
         return;
       }
+      const replacesPresentSegment = (segment: string) =>
+        manifest.segments.includes(segment) && actions[segment] === "replace";
       const replacesWorkspaceData =
-        actions.workspaces === "replace" || actions.connections === "replace";
-      if (replacesWorkspaceData || actions.settings === "replace") {
+        replacesPresentSegment("workspaces") || replacesPresentSegment("connections");
+      if (replacesWorkspaceData || replacesPresentSegment("settings")) {
         closeAllTabs();
       }
       const result = await invokeCommand("import_selective_database", {
@@ -144,18 +136,15 @@ export function SelectiveImportDialog({
     }
   }
 
-  function updateSegmentAction(segment: string, action: SegmentAction) {
+  // A group's action drives every backend segment it owns. Setting all of them
+  // together (even ones absent from this bundle) keeps the "replace Workspaces
+  // ⇒ replace Connections" backend rule satisfied; absent segments carry no
+  // data, so the import loop simply skips them.
+  function updateGroupAction(segments: string[], action: SegmentAction) {
     setActions((prev) => {
-      const next = { ...prev, [segment]: action };
-      if (
-        segment === "workspaces" &&
-        action === "replace" &&
-        selectiveManifest?.segments.includes("connections")
-      ) {
-        next.connections = "replace";
-      }
-      if (segment === "connections" && action !== "replace" && prev.workspaces === "replace") {
-        next.workspaces = "add";
+      const next = { ...prev };
+      for (const segment of segments) {
+        next[segment] = action;
       }
       return next;
     });
@@ -167,6 +156,17 @@ export function SelectiveImportDialog({
     { value: "replace", label: t("settings.importActionReplace") },
   ];
   const selectiveManifest = importKind === "selective" ? manifest : null;
+  // Only show the groups this bundle actually carries, in the export display
+  // order. A group appears if any of its segments is present.
+  const presentGroups = selectiveManifest
+    ? EXPORT_GROUPS.filter((group) =>
+        group.segments.some((segment) => selectiveManifest.segments.includes(segment)),
+      )
+    : [];
+  const groupActionValue = (segments: string[]): SegmentAction => {
+    const present = segments.find((segment) => selectiveManifest?.segments.includes(segment));
+    return (present && actions[present]) || "add";
+  };
   const passphraseNeeded = Boolean(selectiveManifest?.encrypted) && actions.credentials !== "skip";
   const canImport = Boolean(importKind) && !busy && (!passphraseNeeded || passphrase.length > 0);
 
@@ -211,17 +211,17 @@ export function SelectiveImportDialog({
         ) : selectiveManifest ? (
           <>
             <Group title={t("settings.selectiveImportActionsHint")}>
-              {selectiveManifest.segments.map((segment) => (
+              {presentGroups.map((group) => (
                 <GRow
-                  key={segment}
-                  icon={SEGMENT_ICONS[segment] ?? "package"}
-                  label={t(`settings.segment_${segment}`)}
+                  key={group.id}
+                  icon={group.icon}
+                  label={t(`settings.segment_${group.id}`)}
                   control={
                     <Select
                       options={actionOptions}
-                      value={actions[segment] ?? "add"}
+                      value={groupActionValue(group.segments)}
                       onChange={(event) =>
-                        updateSegmentAction(segment, event.currentTarget.value as SegmentAction)
+                        updateGroupAction(group.segments, event.currentTarget.value as SegmentAction)
                       }
                     />
                   }

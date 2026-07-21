@@ -15,16 +15,18 @@ import {
 import { invokeCommand, selectSelectiveExportFile } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
 
-/// Categories offered for selective export, in display order. Each maps to a
-/// backend segment understood by `export_selective_database`.
-export const EXPORT_SEGMENTS: { id: string; icon: DialogIconName }[] = [
-  { id: "connections", icon: "server" },
-  { id: "workspaces", icon: "package" },
-  { id: "dashboards", icon: "dashboard" },
-  { id: "settings", icon: "gear" },
-  { id: "mcpServers", icon: "cloud" },
-  { id: "itops", icon: "network" },
-  { id: "assistant", icon: "bot" },
+/// Categories offered for selective export, in display order. Each group maps to
+/// one or more backend segments understood by `export_selective_database`; the
+/// grouping is a UI concern only — the bundle still carries the individual
+/// segments, so bundles stay compatible across app versions. Workspaces and
+/// Connections always travel together (a Connection is meaningless without its
+/// Workspace), and MCP Servers ride along with the rest of Settings.
+export const EXPORT_GROUPS: { id: string; icon: DialogIconName; segments: string[] }[] = [
+  { id: "workspacesConnections", icon: "server", segments: ["workspaces", "connections"] },
+  { id: "dashboards", icon: "dashboard", segments: ["dashboards"] },
+  { id: "itops", icon: "network", segments: ["itops"] },
+  { id: "assistant", icon: "bot", segments: ["assistant"] },
+  { id: "settings", icon: "gear", segments: ["settings", "mcpServers"] },
 ];
 
 function defaultExportFilename() {
@@ -36,22 +38,18 @@ function defaultExportFilename() {
 export function SelectiveExportDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const showStatusBarNotice = useWorkspaceStore((s) => s.showStatusBarNotice);
-  const [selected, setSelected] = useState<Record<string, boolean>>({
-    connections: true,
-    workspaces: true,
-    dashboards: true,
-    settings: true,
-    mcpServers: true,
-    itops: true,
-    assistant: true,
-  });
+  const [selected, setSelected] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(EXPORT_GROUPS.map((group) => [group.id, true])),
+  );
   const [includeCredentials, setIncludeCredentials] = useState(false);
   const [passphrase, setPassphrase] = useState("");
   const [passphraseConfirm, setPassphraseConfirm] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const connectionsSelected = Boolean(selected.connections);
-  const chosenSegments = EXPORT_SEGMENTS.filter((segment) => selected[segment.id]).map((s) => s.id);
+  const connectionsSelected = Boolean(selected.workspacesConnections);
+  const chosenSegments = EXPORT_GROUPS
+    .filter((group) => selected[group.id])
+    .flatMap((group) => group.segments);
   const passphraseValid = !includeCredentials || (passphrase.length > 0 && passphrase === passphraseConfirm);
   const canExport =
     !busy
@@ -105,17 +103,17 @@ export function SelectiveExportDialog({ onClose }: { onClose: () => void }) {
         }
       >
         <Group title={t("settings.selectiveExportPickHint")}>
-          {EXPORT_SEGMENTS.map((segment) => (
+          {EXPORT_GROUPS.map((group) => (
             <GRow
-              key={segment.id}
-              icon={segment.icon}
-              label={t(`settings.segment_${segment.id}`)}
-              desc={t(`settings.segmentDesc_${segment.id}`)}
+              key={group.id}
+              icon={group.icon}
+              label={t(`settings.segment_${group.id}`)}
+              desc={t(`settings.segmentDesc_${group.id}`)}
               control={
                 <Switch
-                  on={Boolean(selected[segment.id])}
-                  ariaLabel={t(`settings.segment_${segment.id}`)}
-                  onChange={(next) => setSelected((prev) => ({ ...prev, [segment.id]: next }))}
+                  on={Boolean(selected[group.id])}
+                  ariaLabel={t(`settings.segment_${group.id}`)}
+                  onChange={(next) => setSelected((prev) => ({ ...prev, [group.id]: next }))}
                 />
               }
             />
