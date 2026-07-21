@@ -222,6 +222,15 @@ export function ScreenshotsPage({ active }: { active: boolean }) {
     }
   }
 
+  async function copyEditedScreenshot(dataUrl: string) {
+    try {
+      await invokeCommand("write_screenshot_data_url_to_clipboard", { request: { dataUrl } });
+      showStatusBarNotice(t("screenshots.copied"), { tone: "success" });
+    } catch (error) {
+      notifyError(error);
+    }
+  }
+
   function openExternal(screenshot: StoredScreenshot) {
     invokeCommand("open_screenshot_file", { id: screenshot.id }).catch(notifyError);
   }
@@ -621,7 +630,7 @@ export function ScreenshotsPage({ active }: { active: boolean }) {
               setViewerId(next.id);
             }
           }}
-          onCopy={() => void copyScreenshot(viewerScreenshot)}
+          onCopyEdited={(dataUrl) => void copyEditedScreenshot(dataUrl)}
           onOpenExternal={() => openExternal(viewerScreenshot)}
           onReveal={() => revealScreenshot(viewerScreenshot)}
           onDelete={() => setDeleteTargets([viewerScreenshot])}

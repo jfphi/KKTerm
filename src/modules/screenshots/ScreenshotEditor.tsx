@@ -13,13 +13,12 @@ import {
   Circle,
   Copy,
   ExternalLink,
-  FilePlus,
+  Floppy,
   FolderOpen,
   Grid2x2,
   Hand,
   Maximize2,
   RotateCcw,
-  Save,
   Square,
   Trash2,
   Type,
@@ -88,6 +87,15 @@ function initialEditorSize() {
     width: Math.max(720, Math.round(window.innerWidth * 0.8)),
     height: Math.max(480, Math.round(window.innerHeight * 0.8)),
   };
+}
+
+function MultipleFloppy({ size = 15 }: { size?: number }) {
+  return (
+    <span className="screenshots-editor__multi-floppy" aria-hidden="true">
+      <Floppy size={size} />
+      <Floppy size={size} />
+    </span>
+  );
 }
 
 function drawShape(
@@ -172,7 +180,7 @@ export function ScreenshotEditor({
   hasPrevious,
   hasNext,
   onNavigate,
-  onCopy,
+  onCopyEdited,
   onOpenExternal,
   onReveal,
   onDelete,
@@ -184,7 +192,7 @@ export function ScreenshotEditor({
   hasPrevious: boolean;
   hasNext: boolean;
   onNavigate: (direction: -1 | 1) => void;
-  onCopy: () => void;
+  onCopyEdited: (dataUrl: string) => void;
   onOpenExternal: () => void;
   onReveal: () => void;
   onDelete: () => void;
@@ -393,6 +401,14 @@ export function ScreenshotEditor({
     event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
+  function copyEditedImage() {
+    const canvas = canvasRef.current;
+    if (!canvas || !ready || saving) {
+      return;
+    }
+    onCopyEdited(canvas.toDataURL("image/png"));
+  }
+
   async function save(mode: EditorSaveMode, navigateDirection?: -1 | 1) {
     const canvas = canvasRef.current;
     if (!canvas || !ready || (mode === "overwrite" && !dirty) || saving) {
@@ -552,7 +568,7 @@ export function ScreenshotEditor({
                 disabled={!ready || !dirty || saving}
                 onClick={() => void save("overwrite")}
               >
-                <Save size={15} aria-hidden="true" />
+                <Floppy size={15} aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -561,7 +577,7 @@ export function ScreenshotEditor({
                 disabled={!ready || saving}
                 onClick={() => void save("copy")}
               >
-                <FilePlus size={15} aria-hidden="true" />
+                <MultipleFloppy />
               </button>
               <button
                 type="button"
@@ -576,8 +592,8 @@ export function ScreenshotEditor({
                 type="button"
                 title={t("screenshots.menu.copy")}
                 aria-label={t("screenshots.menu.copy")}
-                disabled={saving}
-                onClick={onCopy}
+                disabled={!ready || saving}
+                onClick={copyEditedImage}
               >
                 <Copy size={15} aria-hidden="true" />
               </button>
