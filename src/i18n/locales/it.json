@@ -2004,6 +2004,8 @@
     "screenshotsIncludeCursorHint": "Disegna il puntatore del mouse nelle nuove catture.",
     "screenshotsShortcuts": "Scorciatoie globali di cattura",
     "screenshotsShortcutsHint": "Queste scorciatoie funzionano in tutto il sistema mentre KKTerm è in esecuzione, anche quando è nascosto nell'area di notifica.",
+    "screenshotsEditorShortcuts": "Editor screenshot",
+    "screenshotsEditorShortcutsHint": "Queste scorciatoie funzionano mentre l’editor screenshot è aperto.",
     "screenshotsSaved": "Impostazioni degli screenshot salvate.",
     "sectionAbout": "Informazioni",
     "generalDefaults": "Predefiniti spazio di lavoro",

@@ -2004,6 +2004,8 @@
     "screenshotsIncludeCursorHint": "Vẽ con trỏ chuột vào ảnh chụp mới.",
     "screenshotsShortcuts": "Phím tắt chụp toàn cục",
     "screenshotsShortcutsHint": "Các phím tắt này hoạt động trên toàn hệ thống khi KKTerm đang chạy, kể cả khi ẩn trong khay hệ thống.",
+    "screenshotsEditorShortcuts": "Trình chỉnh sửa ảnh chụp màn hình",
+    "screenshotsEditorShortcutsHint": "Các phím tắt này hoạt động khi trình chỉnh sửa ảnh chụp màn hình đang mở.",
     "screenshotsSaved": "Đã lưu cài đặt ảnh chụp màn hình.",
     "sectionAbout": "About",
     "generalDefaults": "Workspace defaults",

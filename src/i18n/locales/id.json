@@ -2004,6 +2004,8 @@
     "screenshotsIncludeCursorHint": "Menggambar penunjuk mouse ke dalam tangkapan baru.",
     "screenshotsShortcuts": "Pintasan tangkapan global",
     "screenshotsShortcutsHint": "Pintasan ini berfungsi di seluruh sistem selama KKTerm berjalan, termasuk saat tersembunyi di baki sistem.",
+    "screenshotsEditorShortcuts": "Editor tangkapan layar",
+    "screenshotsEditorShortcutsHint": "Pintasan ini berfungsi saat editor tangkapan layar terbuka.",
     "screenshotsSaved": "Pengaturan tangkapan layar disimpan.",
     "sectionAbout": "Tentang",
     "generalDefaults": "Default ruang kerja",

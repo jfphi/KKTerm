@@ -2004,6 +2004,8 @@
     "screenshotsIncludeCursorHint": "Desenha o ponteiro do mouse nas novas capturas.",
     "screenshotsShortcuts": "Atalhos globais de captura",
     "screenshotsShortcutsHint": "Esses atalhos funcionam em todo o sistema enquanto o KKTerm está em execução, inclusive oculto na bandeja.",
+    "screenshotsEditorShortcuts": "Editor de captura",
+    "screenshotsEditorShortcutsHint": "Esses atalhos funcionam enquanto o editor de captura está aberto.",
     "screenshotsSaved": "Configurações de captura de tela salvas.",
     "sectionAbout": "Sobre",
     "generalDefaults": "Padrões da área de trabalho",

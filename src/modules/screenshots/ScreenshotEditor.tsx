@@ -49,6 +49,8 @@ import {
   type FullScreenshot,
   type StoredScreenshot,
 } from "../../lib/tauri";
+import { useWorkspaceStore } from "../../store";
+import { workspaceShortcutFromKeyboardEvent } from "../workspace/keymap";
 import { formatScreenshotBytes } from "./LibraryView";
 import { cropImagePlacement, fitImageDimensions } from "./editorSizing";
 
@@ -595,6 +597,7 @@ export function ScreenshotEditor({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const shortcutOverrides = useWorkspaceStore((state) => state.generalSettings.workspaceShortcuts);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -1708,23 +1711,45 @@ export function ScreenshotEditor({
             if (event.key === "Escape" && !saving) {
               event.preventDefault();
               requestClose();
-            } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-              if (!editingText) {
-                event.preventDefault();
-                undo();
-              }
+              return;
+            }
+            if (editingText) {
+              return;
+            }
+            const shortcutAction = workspaceShortcutFromKeyboardEvent(
+              event.nativeEvent,
+              shortcutOverrides,
+              "screenshotEditor",
+            );
+            if (shortcutAction === "screenshotEditorCopy") {
+              event.preventDefault();
+              copyEditedImage();
+              return;
+            }
+            if (shortcutAction === "screenshotEditorSave") {
+              event.preventDefault();
+              void save();
+              return;
+            }
+            if (shortcutAction === "screenshotEditorSaveAs") {
+              event.preventDefault();
+              void saveAs();
+              return;
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+              event.preventDefault();
+              undo();
             } else if (
-              !editingText
-              && (event.key === "Delete" || event.key === "Backspace")
+              (event.key === "Delete" || event.key === "Backspace")
               && selectedId !== null
               && tool === "select"
             ) {
               event.preventDefault();
               deleteAnnotation(selectedId);
-            } else if (!editingText && event.key === "ArrowLeft" && hasPrevious) {
+            } else if (event.key === "ArrowLeft" && hasPrevious) {
               event.preventDefault();
               requestNavigation(-1);
-            } else if (!editingText && event.key === "ArrowRight" && hasNext) {
+            } else if (event.key === "ArrowRight" && hasNext) {
               event.preventDefault();
               requestNavigation(1);
             }

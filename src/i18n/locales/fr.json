@@ -2004,6 +2004,8 @@
     "screenshotsIncludeCursorHint": "Dessine le pointeur de la souris dans les nouvelles captures.",
     "screenshotsShortcuts": "Raccourcis globaux de capture",
     "screenshotsShortcutsHint": "Ces raccourcis fonctionnent dans tout le système tant que KKTerm est en cours d'exécution, même masqué dans la zone de notification.",
+    "screenshotsEditorShortcuts": "Éditeur de capture",
+    "screenshotsEditorShortcutsHint": "Ces raccourcis fonctionnent lorsque l’éditeur de capture est ouvert.",
     "screenshotsSaved": "Paramètres des captures d'écran enregistrés.",
     "sectionAbout": "À propos",
     "generalDefaults": "Valeurs par défaut de l'espace de travail",
