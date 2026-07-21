@@ -12,7 +12,7 @@ import {
   Clipboard as ReClipboard, ClipboardCheck as ReClipboardCheck, ClipboardImport2 as ReClipboardImport2, ClipboardList as ReClipboardList,
   ClockCircle as ReClockCircle, CloseCircle2 as ReCloseCircle2, CloseSquare2 as ReCloseSquare2, Cloud as ReCloud,
   Code as ReCode, Code2 as ReCode2, Coffee2 as ReCoffee2, Command as ReCommand,
-  Compass as ReCompass, Copy as ReCopy, Cpu as ReCpu, CursorSquare as ReCursorSquare,
+  Compass as ReCompass, Copy as ReCopy, Cpu as ReCpu, Crop as ReCrop, CursorSquare as ReCursorSquare,
   Database as ReDatabase, DocumentCode2 as ReDocumentCode2, DocumentText2 as ReDocumentText2, Download as ReDownload,
   Edit2 as ReEdit2, Envelope as ReEnvelope, Eye as ReEye, EyeOff as ReEyeOff,
   File as ReFile, FilePlus as ReFilePlus, FileText as ReFileText, FileUp as ReFileUp,
@@ -72,7 +72,7 @@ const reiconIconComponents = {
   "CircleHelp": ReHelpCircle, "CircleX": ReCloseCircle2, "Clipboard": ReClipboard, "ClipboardCheck": ReClipboardCheck,
   "ClipboardList": ReClipboardList, "ClipboardPaste": ReClipboardImport2, "Clock": ReClockCircle, "Cloud": ReCloud,
   "Code": ReCode, "Code2": ReCode2, "Coffee": ReCoffee2, "Cog": ReGear,
-  "Command": ReCommand, "Compass": ReCompass, "Copy": ReCopy, "Cpu": ReCpu,
+  "Command": ReCommand, "Compass": ReCompass, "Copy": ReCopy, "Cpu": ReCpu, "Crop": ReCrop,
   "Database": ReDatabase, "Doc": ReDocumentText2, "Download": ReDownload, "Edit3": ReEdit2,
   "Eye": ReEye, "EyeOff": ReEyeOff, "File": ReFile, "FileCode": ReDocumentCode2,
   "FileImage": ReImage, "FileJson": ReDocumentCode2, "FilePlus": ReFilePlus, "FileTerminal": ReTerminalSquare,
@@ -192,6 +192,7 @@ export const Cog = ReGear;
 export const Command = ReCommand;
 export const Compass = ReCompass;
 export const Copy = ReCopy;
+export const Crop = ReCrop;
 export const Cpu = ReCpu;
 export const Database = ReDatabase;
 export const Doc = ReDocumentText2;

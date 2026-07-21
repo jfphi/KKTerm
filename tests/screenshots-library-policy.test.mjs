@@ -56,13 +56,17 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
     read("src-tauri/src/screenshot.rs"),
   ]);
 
-  for (const tool of ["pan", "select", "pencil", "arrow", "rectangle", "ellipse", "text", "mosaic"]) {
+  for (const tool of ["pan", "select", "pencil", "arrow", "rectangle", "ellipse", "text", "mosaic", "crop"]) {
     assert.match(editor, new RegExp(`id: "${tool}"`));
   }
   assert.match(editor, /id: "pan", icon: Hand[\s\S]*?id: "select", icon: MousePointer2[\s\S]*?id: "pencil", icon: Pencil[\s\S]*?id: "arrow"/);
+  assert.match(editor, /id: "mosaic", icon: Grid2x2[\s\S]*?id: "crop", icon: Crop/);
   assert.match(editor, /type FreehandAnnotation = [\s\S]*?kind: "pencil"[\s\S]*?points: Point\[\]/);
+  assert.match(editor, /type EditorSnapshot = \{ annotations: Annotation\[\]; cropRect: Rect \| null \}/);
   assert.match(editor, /function drawFreehand\(/);
   assert.match(editor, /tool === "pencil"[\s\S]*?freehandRef\.current/);
+  assert.match(editor, /function applyCrop\(/);
+  assert.match(editor, /cropRectRef\.current/);
   assert.match(editor, /stage\.scrollLeft = pan\.scrollLeft/);
   assert.match(editor, /stage\.scrollTop = pan\.scrollTop/);
   assert.match(editor, /<Sheet/);

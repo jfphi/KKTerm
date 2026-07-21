@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Circle,
   Copy,
+  Crop,
   ExternalLink,
   Floppy,
   FolderOpen,
@@ -45,7 +46,7 @@ import { invokeCommand, type FullScreenshot, type StoredScreenshot } from "../..
 import { formatScreenshotBytes } from "./LibraryView";
 import { fitImageDimensions } from "./editorSizing";
 
-type EditorTool = "pan" | "select" | "pencil" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic";
+type EditorTool = "pan" | "select" | "pencil" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic" | "crop";
 type ShapeKind = "arrow" | "rectangle" | "ellipse";
 type Point = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -83,6 +84,7 @@ type TextAnnotation = {
   italic: boolean;
 };
 type Annotation = ShapeAnnotation | MosaicAnnotation | FreehandAnnotation | TextAnnotation;
+type EditorSnapshot = { annotations: Annotation[]; cropRect: Rect | null };
 type TextDraft = {
   id: number | null;
   x: number;
@@ -113,6 +115,7 @@ const EDITOR_TOOLS: Array<{
   { id: "ellipse", icon: Circle, key: "screenshots.editor.ellipse" },
   { id: "text", icon: Type, key: "screenshots.editor.text" },
   { id: "mosaic", icon: Grid2x2, key: "screenshots.editor.mosaic" },
+  { id: "crop", icon: Crop, key: "screenshots.editor.crop" },
 ];
 const STROKE_OPTIONS = [
   { width: 2, dot: 3, key: "screenshots.editor.strokeThin" },
@@ -178,6 +181,23 @@ function normalizedRect(start: Point, end: Point): Rect {
     width: Math.abs(end.x - start.x),
     height: Math.abs(end.y - start.y),
   };
+}
+
+function clampCropRect(rect: Rect, width: number, height: number): Rect {
+  const x = Math.max(0, Math.min(width - 1, Math.floor(rect.x)));
+  const y = Math.max(0, Math.min(height - 1, Math.floor(rect.y)));
+  const right = Math.max(x + 1, Math.min(width, Math.ceil(rect.x + rect.width)));
+  const bottom = Math.max(y + 1, Math.min(height, Math.ceil(rect.y + rect.height)));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function rectsIntersect(a: Rect, b: Rect) {
+  return (
+    a.x < b.x + b.width
+    && a.x + a.width > b.x
+    && a.y < b.y + b.height
+    && a.y + a.height > b.y
+  );
 }
 
 function expandRect(rect: Rect, pad: number): Rect {
@@ -543,8 +563,9 @@ export function ScreenshotEditor({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const undoRef = useRef<Annotation[][]>([]);
+  const undoRef = useRef<EditorSnapshot[]>([]);
   const annotationsRef = useRef<Annotation[]>([]);
+  const cropRectRef = useRef<Rect | null>(null);
   const editingRef = useRef<TextDraft | null>(null);
   const idRef = useRef(1);
   const drawingRef = useRef<{ start: Point } | null>(null);
@@ -582,6 +603,7 @@ export function ScreenshotEditor({
   const [color, setColor] = useState(swatches[0].value);
   const [stroke, setStroke] = useState<number>(STROKE_OPTIONS[1].width);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [cropRect, setCropRect] = useState<Rect | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editing, setEditing] = useState<TextDraft | null>(null);
   const [textSize, setTextSize] = useState(32);
@@ -593,7 +615,7 @@ export function ScreenshotEditor({
   const [undoCount, setUndoCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingEditorAction | null>(null);
-  const dirty = annotations.length > 0;
+  const dirty = annotations.length > 0 || cropRect !== null;
   const editingId = editing?.id ?? null;
 
   function applyAnnotations(next: Annotation[]) {
@@ -606,14 +628,48 @@ export function ScreenshotEditor({
     setEditing(next);
   }
 
-  function renderCanvas() {
+  function applyCropRect(next: Rect | null) {
     const canvas = canvasRef.current;
     const base = baseRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !base || !context) {
+    cropRectRef.current = next;
+    setCropRect(next);
+    if (!canvas || !base) {
       return;
     }
-    context.drawImage(base, 0, 0);
+    const width = next?.width ?? base.width;
+    const height = next?.height ?? base.height;
+    canvas.width = width;
+    canvas.height = height;
+    setCanvasSize({ width, height });
+  }
+
+  function drawBase(context: CanvasRenderingContext2D) {
+    const base = baseRef.current;
+    if (!base) {
+      return;
+    }
+    const source = cropRectRef.current ?? { x: 0, y: 0, width: base.width, height: base.height };
+    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    context.drawImage(
+      base,
+      source.x,
+      source.y,
+      source.width,
+      source.height,
+      0,
+      0,
+      context.canvas.width,
+      context.canvas.height,
+    );
+  }
+
+  function renderCanvas() {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) {
+      return;
+    }
+    drawBase(context);
     const hiddenId = editingRef.current?.id ?? null;
     for (const annotation of annotationsRef.current) {
       if (annotation.id !== hiddenId) {
@@ -631,6 +687,8 @@ export function ScreenshotEditor({
     setUndoCount(0);
     setSelectedId(null);
     undoRef.current = [];
+    cropRectRef.current = null;
+    setCropRect(null);
     annotationsRef.current = [];
     setAnnotations([]);
     editingRef.current = null;
@@ -691,10 +749,15 @@ export function ScreenshotEditor({
     if (ready) {
       renderCanvas();
     }
+    // Canvas rendering reads the latest refs; these values are intentional redraw triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, annotations, editingId]);
 
   function pushUndo(before: Annotation[]) {
-    undoRef.current = [...undoRef.current.slice(-(UNDO_LIMIT - 1)), before];
+    undoRef.current = [
+      ...undoRef.current.slice(-(UNDO_LIMIT - 1)),
+      { annotations: before, cropRect: cropRectRef.current },
+    ];
     setUndoCount(undoRef.current.length);
   }
 
@@ -707,10 +770,40 @@ export function ScreenshotEditor({
       return;
     }
     setUndoCount(undoRef.current.length);
-    applyAnnotations(previous);
+    applyCropRect(previous.cropRect);
+    applyAnnotations(previous.annotations);
     setSelectedId((current) => (
-      current !== null && previous.some((annotation) => annotation.id === current) ? current : null
+      current !== null && previous.annotations.some((annotation) => annotation.id === current) ? current : null
     ));
+  }
+
+  function applyCrop(requested: Rect) {
+    const canvas = canvasRef.current;
+    const base = baseRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !base || !context) {
+      return;
+    }
+    const crop = clampCropRect(requested, canvas.width, canvas.height);
+    if (crop.width < 2 || crop.height < 2) {
+      renderCanvas();
+      return;
+    }
+    const before = annotationsRef.current;
+    pushUndo(before);
+    const translated = before
+      .filter((annotation) => rectsIntersect(annotationBounds(context, annotation), crop))
+      .map((annotation) => translateAnnotation(annotation, -crop.x, -crop.y));
+    const source = cropRectRef.current ?? { x: 0, y: 0, width: base.width, height: base.height };
+    applyCropRect({
+      x: source.x + crop.x,
+      y: source.y + crop.y,
+      width: crop.width,
+      height: crop.height,
+    });
+    applyAnnotations(translated);
+    setSelectedId(null);
+    setZoom("fit");
   }
 
   function annotationById(id: number | null) {
@@ -1107,11 +1200,20 @@ export function ScreenshotEditor({
     }
     const end = canvasPoint(canvas, event.clientX, event.clientY);
     renderCanvas();
-    if (tool === "mosaic") {
+    if (tool === "mosaic" || tool === "crop") {
       const cssPixel = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
       const rect = normalizedRect(drawing.start, end);
       context.save();
-      context.strokeStyle = "rgba(127, 127, 127, 0.9)";
+      if (tool === "crop") {
+        context.fillStyle = "rgba(0, 0, 0, 0.38)";
+        context.fillRect(0, 0, canvas.width, rect.y);
+        context.fillRect(0, rect.y, rect.x, rect.height);
+        context.fillRect(rect.x + rect.width, rect.y, canvas.width - rect.x - rect.width, rect.height);
+        context.fillRect(0, rect.y + rect.height, canvas.width, canvas.height - rect.y - rect.height);
+        context.strokeStyle = cssToken("--accent", "#0a84ff");
+      } else {
+        context.strokeStyle = "rgba(127, 127, 127, 0.9)";
+      }
       context.lineWidth = cssPixel;
       context.setLineDash([6 * cssPixel, 4 * cssPixel]);
       context.strokeRect(rect.x, rect.y, rect.width, rect.height);
@@ -1181,6 +1283,10 @@ export function ScreenshotEditor({
     const rect = normalizedRect(drawing.start, end);
     if (rect.width < 2 && rect.height < 2) {
       renderCanvas();
+      return;
+    }
+    if (tool === "crop") {
+      applyCrop(rect);
       return;
     }
     const before = annotationsRef.current;
@@ -1286,7 +1392,7 @@ export function ScreenshotEditor({
     if (!context || !base) {
       return output;
     }
-    context.drawImage(base, 0, 0);
+    drawBase(context);
     for (const annotation of annotationsRef.current) {
       drawAnnotation(context, annotation);
     }
@@ -1306,7 +1412,7 @@ export function ScreenshotEditor({
       return;
     }
     commitTextDraft();
-    if (mode === "overwrite" && annotationsRef.current.length === 0) {
+    if (mode === "overwrite" && annotationsRef.current.length === 0 && cropRectRef.current === null) {
       return;
     }
     setSaving(true);
@@ -1319,7 +1425,12 @@ export function ScreenshotEditor({
           saveAsCopy: mode === "copy",
         },
       });
-      baseRef.current?.getContext("2d")?.drawImage(flattened, 0, 0);
+      const savedBase = document.createElement("canvas");
+      savedBase.width = flattened.width;
+      savedBase.height = flattened.height;
+      savedBase.getContext("2d")?.drawImage(flattened, 0, 0);
+      baseRef.current = savedBase;
+      applyCropRect(null);
       undoRef.current = [];
       setUndoCount(0);
       applyAnnotations([]);
