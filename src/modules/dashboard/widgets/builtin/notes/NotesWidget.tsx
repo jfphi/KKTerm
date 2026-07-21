@@ -4,6 +4,7 @@ import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { readFromClipboard, writeToClipboard } from "../../../../../lib/clipboard";
 import { showNativeContextMenu } from "../../../../../lib/nativeContextMenu";
 import type { BuiltInWidgetBodyProps } from "../../../registry/builtInRegistry";
 import { useDurableWidgetConfig } from "../../widgetLocalStorage";
@@ -118,7 +119,7 @@ export function parseNotesSettingsJson(settingsValuesJson: string): NotesWidgetS
 }
 
 function renderMarkdown(markdown: string) {
-  const html = marked.parse(markdown, { async: false }) as string;
+  const html = marked.parse(markdown, { async: false, breaks: true }) as string;
   return DOMPurify.sanitize(html);
 }
 
@@ -189,6 +190,22 @@ export function NotesBody({ instance }: BuiltInWidgetBodyProps) {
     return window.getSelection()?.toString() ?? "";
   }
 
+  function insertTextIntoNote(textArea: HTMLTextAreaElement, text: string) {
+    const selectionStart = textArea.selectionStart;
+    const selectionEnd = textArea.selectionEnd;
+    const nextPage = `${textArea.value.slice(0, selectionStart)}${text}${textArea.value.slice(selectionEnd)}`;
+    const nextCaret = selectionStart + text.length;
+    updateActivePage(nextPage);
+    window.requestAnimationFrame(() => {
+      textAreaRef.current?.focus();
+      textAreaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  }
+
+  function deleteNoteSelection(textArea: HTMLTextAreaElement) {
+    insertTextIntoNote(textArea, "");
+  }
+
   function handleMarkdownClick(event: ReactMouseEvent<HTMLDivElement>) {
     if (event.button !== 0 || selectedTextFromNotesSurface().trim().length > 0) {
       return;
@@ -197,8 +214,11 @@ export function NotesBody({ instance }: BuiltInWidgetBodyProps) {
   }
 
   async function handleNotesContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    const textArea = event.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget : null;
     const selectedText = selectedTextFromNotesSurface();
-    if (selectedText.trim().length === 0) {
+    const hasSelection = selectedText.length > 0;
+
+    if (!textArea && !hasSelection) {
       return;
     }
 
@@ -208,9 +228,41 @@ export function NotesBody({ instance }: BuiltInWidgetBodyProps) {
       [
         {
           kind: "item",
-          label: t("common.copy"),
+          label: t("common.cut"),
+          disabled: !textArea || !hasSelection,
           action: () => {
-            void navigator.clipboard.writeText(selectedText);
+            if (!textArea || !selectedText) {
+              return;
+            }
+            void writeToClipboard(selectedText);
+            deleteNoteSelection(textArea);
+          },
+        },
+        {
+          kind: "item",
+          label: t("common.copy"),
+          disabled: !hasSelection,
+          action: () => {
+            if (selectedText) {
+              void writeToClipboard(selectedText);
+            }
+          },
+        },
+        {
+          kind: "item",
+          label: t("common.paste"),
+          disabled: !textArea,
+          action: () => {
+            if (!textArea) {
+              return;
+            }
+            void readFromClipboard().then((text) => {
+              if (text) {
+                insertTextIntoNote(textArea, text);
+              } else {
+                textArea.focus();
+              }
+            });
           },
         },
       ],
