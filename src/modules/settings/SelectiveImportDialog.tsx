@@ -94,9 +94,11 @@ export function SelectiveImportDialog({
         setBusy(false);
         return;
       }
+      const replacesPresentSegment = (segment: string) =>
+        manifest.segments.includes(segment) && actions[segment] === "replace";
       const replacesWorkspaceData =
-        actions.workspaces === "replace" || actions.connections === "replace";
-      if (replacesWorkspaceData || actions.settings === "replace") {
+        replacesPresentSegment("workspaces") || replacesPresentSegment("connections");
+      if (replacesWorkspaceData || replacesPresentSegment("settings")) {
         closeAllTabs();
       }
       const result = await invokeCommand("import_selective_database", {
