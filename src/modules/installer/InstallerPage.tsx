@@ -15,7 +15,7 @@
 //   * Activation (switching to the Module from another Module): run an
 //     interval-gated latest-version check. The check only fetches when the
 //     configured interval (General Settings → Install Helper, default once
-//     per day) has elapsed since the last successful check; the last-check
+//     per day) has elapsed since the last completed check; the last-check
 //     timestamp is persisted per tool in SQLite and survives app launches.
 //     Otherwise the persisted check state is reused without a network fetch.
 //   * "Refresh" button (manual check): re-run detection, then check latest
@@ -250,7 +250,7 @@ export function InstallerPage({ active }: { active: boolean }) {
       }
 
       // Interval-gated latest-version check: skip the network fetch when the
-      // last successful check is still within the configured interval.
+      // last completed check is still within the configured interval.
       const latest = useInstallerStore.getState();
       if (latest.checking) return;
       const lastCheck = latestTimestamp(

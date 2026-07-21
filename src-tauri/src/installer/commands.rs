@@ -333,6 +333,13 @@ pub fn installer_check_latest_versions(
                                 latest.as_deref(),
                                 now,
                             );
+                        } else {
+                            // A completed lookup attempt still counts toward the
+                            // configured auto-check interval. Keep the cached
+                            // latest version, but persist the attempt time so a
+                            // provider outage is not retried on every app launch.
+                            let storage = app.state::<Storage>();
+                            let _ = st::record_check_attempt(&storage, &tool_id, now);
                         }
                         crate::logging::installer_helper_debug(
                             "latest.check.result",
