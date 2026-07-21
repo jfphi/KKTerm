@@ -206,7 +206,7 @@ function estimateUacPromptsFor(
           ? sum +
               estimateUacPromptsFor(
                 stepRecipe,
-                undefined,
+                options,
                 byId,
                 detected,
                 directlyActionableIds,

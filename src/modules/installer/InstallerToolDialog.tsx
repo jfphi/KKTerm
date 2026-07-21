@@ -1612,6 +1612,9 @@ function defaultInstallOptionsForRecipe(
   ) {
     return { provider: "chocolatey" };
   }
+  if (preferredProvider === "chocolatey" && recipe.provider.kind === "bundle") {
+    return { provider: "chocolatey" };
+  }
   return {};
 }
 
