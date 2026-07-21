@@ -17,7 +17,7 @@ Capture actions live in the single-row Module header toolbar and follow `setting
 - `screenshots.captureWindow` (tutorial target `screenshots.captureWindow`) — native window picker on Windows/macOS; the Windows picker dims everything outside the highlighted window. On Linux it captures the foreground desktop window after KKTerm minimizes.
 - `screenshots.captureFullscreen` (tutorial target `screenshots.captureFullscreen`) — captures the entire virtual desktop across all monitors.
 
-The KKTerm window minimizes out of the way during a capture and restores afterwards. Capture Mode defaults to `settings.screenshotsCaptureModeBoth`, which saves the image to the library and copies it to the clipboard. Folder-only uses `screenshots.captureSaved`, clipboard-only uses `screenshots.captureCopied`, and Both uses `screenshots.captureSavedAndCopied`; only captures saved to the folder are prepended to the library.
+Captures started from the Module header toolbar minimize the KKTerm window out of the way and restore it afterwards. Tray-menu and global-hotkey captures do not minimize KKTerm, so you can include the KKTerm window in the screenshot when it is visible. Capture Mode defaults to `settings.screenshotsCaptureModeBoth`, which saves the image to the library and copies it to the clipboard. Folder-only uses `screenshots.captureSaved`, clipboard-only uses `screenshots.captureCopied`, and Both uses `screenshots.captureSavedAndCopied`; only captures saved to the folder are prepended to the library.
 
 The Module header toolbar also has `screenshots.delay.label`. Its presets are Instant (default), 3, 5, 15, 30, and 60 seconds. The delay applies to captures started from the Module header toolbar; tray-menu and global-hotkey captures remain immediate.
 
@@ -31,7 +31,7 @@ The unified dialog uses the shared `Sheet`, opens at 80% of the app window, and 
 
 ### Tray captures and global shortcuts
 
-The tray icon menu carries the same three capture items (`screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`) and shows each currently enabled shortcut beside its command. They work while the main window is hidden in the tray, and the window stays hidden after the capture.
+The tray icon menu carries the same three capture items (`screenshots.captureRegion`, `screenshots.captureWindow`, `screenshots.captureFullscreen`) and shows each currently enabled shortcut beside its command. They work while the main window is hidden in the tray, and the window stays hidden after the capture. If KKTerm is visible, tray captures and global-shortcut captures leave it visible instead of minimizing it.
 
 Settings → `settings.sectionScreenshots` → `settings.screenshotsShortcuts` defines three system-wide capture hotkeys (defaults `Ctrl+Alt+R` region, `Ctrl+Alt+W` window, `Ctrl+Alt+F` fullscreen). The same three bindings also appear in Settings → Shortcuts and share one draft, so editing either location updates the other immediately. Click a binding and press a valid key combination to replace and enable it; Escape or focus loss cancels recording. The per-row `settings.shortcutClear` action clears and disables a binding. Registration conflicts with other applications are reported when saving.
 

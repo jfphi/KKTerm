@@ -33,11 +33,11 @@ mod native_tooltip;
 mod net;
 mod pc_info;
 mod performance;
-mod power;
 mod portable_creator;
 mod portable_marker;
 #[cfg(target_os = "windows")]
 mod portable_single_instance;
+mod power;
 mod rdp;
 #[cfg(not(target_os = "windows"))]
 mod rdp_client;
@@ -1921,10 +1921,11 @@ async fn capture_screenshot_to_library(
 async fn capture_fullscreen_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
+    minimize_window: bool,
 ) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("fullscreen screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
-        screenshot::capture_fullscreen_to_library(&app, kind, options, use_directx)
+        screenshot::capture_fullscreen_to_library(&app, kind, options, use_directx, minimize_window)
     })
     .await
 }
@@ -1933,10 +1934,17 @@ async fn capture_fullscreen_screenshot_to_library(
 async fn capture_active_window_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
+    minimize_window: bool,
 ) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("active-window screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
-        screenshot::capture_active_window_to_library(&app, kind, options, use_directx)
+        screenshot::capture_active_window_to_library(
+            &app,
+            kind,
+            options,
+            use_directx,
+            minimize_window,
+        )
     })
     .await
 }
@@ -1945,10 +1953,17 @@ async fn capture_active_window_screenshot_to_library(
 async fn capture_interactive_region_screenshot_to_library(
     app: tauri::AppHandle,
     kind: String,
+    minimize_window: bool,
 ) -> Result<screenshot::ScreenshotCaptureResult, String> {
     run_blocking_screenshot_command("interactive screenshot library capture", move || {
         let (options, use_directx) = screenshot_library_context(&app)?;
-        screenshot::capture_interactive_region_to_library(&app, kind, options, use_directx)
+        screenshot::capture_interactive_region_to_library(
+            &app,
+            kind,
+            options,
+            use_directx,
+            minimize_window,
+        )
     })
     .await
 }
@@ -2284,20 +2299,20 @@ fn create_connection_password_credential(
         return Err("secret value is required".to_string());
     }
     if request.allow_reuse.unwrap_or(false) {
-        let candidates = storage
-            .find_reusable_connection_password_credentials(request.connection_id.clone())?;
+        let candidates =
+            storage.find_reusable_connection_password_credentials(request.connection_id.clone())?;
         for candidate in candidates {
             let existing = secrets.read_connection_password(candidate.id.clone())?;
             if existing.as_deref() == Some(secret.as_str()) {
-                return storage.assign_connection_password_credential(
-                    request.connection_id,
-                    candidate.id,
-                );
+                return storage
+                    .assign_connection_password_credential(request.connection_id, candidate.id);
             }
         }
     }
-    let credential = storage
-        .create_connection_password_credential_metadata(request.connection_id.clone(), request.label)?;
+    let credential = storage.create_connection_password_credential_metadata(
+        request.connection_id.clone(),
+        request.label,
+    )?;
     if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
         credential.id.clone(),
         secret,
@@ -2366,10 +2381,8 @@ fn create_standalone_connection_password_credential(
     if request.secret.is_empty() {
         return Err("secret value is required".to_string());
     }
-    let credential = storage.create_standalone_connection_password_credential(
-        request.label,
-        request.username,
-    )?;
+    let credential = storage
+        .create_standalone_connection_password_credential(request.label, request.username)?;
     if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
         credential.id.clone(),
         request.secret,
@@ -2396,10 +2409,8 @@ fn convert_connection_password_to_credential(
         if !presence.exists() {
             return Err("stored password was not found".to_string());
         }
-        let connection = storage.assign_connection_password_credential(
-            request.connection_id.clone(),
-            credential_id,
-        )?;
+        let connection = storage
+            .assign_connection_password_credential(request.connection_id.clone(), credential_id)?;
         if secrets
             .read_connection_password(request.connection_id.clone())?
             .is_some()
@@ -2413,8 +2424,10 @@ fn convert_connection_password_to_credential(
     let legacy_secret = secrets
         .read_connection_password(request.connection_id.clone())?
         .ok_or_else(|| "no stored password was found for this connection".to_string())?;
-    let credential = storage
-        .create_connection_password_credential_metadata(request.connection_id.clone(), request.label)?;
+    let credential = storage.create_connection_password_credential_metadata(
+        request.connection_id.clone(),
+        request.label,
+    )?;
     if let Err(error) = secrets.store_secret(secrets::StoreSecretRequest::connection_password(
         credential.id.clone(),
         legacy_secret,
@@ -4187,8 +4200,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
-            let paths = app_paths::AppPaths::resolve(app.handle(), &launch_context)
-                .map_err(setup_error)?;
+            let paths =
+                app_paths::AppPaths::resolve(app.handle(), &launch_context).map_err(setup_error)?;
             let portable_mode = paths.is_portable();
             let db_path = paths.data_dir().join("kkterm.sqlite3");
             let mcp_bridge_dir = paths.data_dir().to_path_buf();
@@ -4413,8 +4426,7 @@ pub fn run() {
                 ai_provider_settings.built_in_mcp_server_enabled(),
                 ai_provider_settings.built_in_mcp_allow_all_dangerous(),
             );
-            app_paths::start_portable_smoke_test_if_requested(app.handle())
-                .map_err(setup_error)?;
+            app_paths::start_portable_smoke_test_if_requested(app.handle()).map_err(setup_error)?;
             Ok(())
         })
         .on_window_event(|window, event| {

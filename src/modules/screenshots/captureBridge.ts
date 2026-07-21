@@ -24,6 +24,7 @@ export async function performScreenshotCapture(
   mode: ScreenshotCaptureMode,
   t: TFunction,
   delaySeconds = 0,
+  minimizeWindow = false,
 ) {
   const notify = useWorkspaceStore.getState().showStatusBarNotice;
   if (!isTauriRuntime()) {
@@ -44,13 +45,16 @@ export async function performScreenshotCapture(
       mode === "region"
         ? await invokeCommand("capture_interactive_region_screenshot_to_library", {
             kind: "region",
+            minimizeWindow,
           })
         : mode === "window"
           ? await invokeCommand("capture_active_window_screenshot_to_library", {
               kind: "window",
+              minimizeWindow,
             })
           : await invokeCommand("capture_fullscreen_screenshot_to_library", {
               kind: "fullscreen",
+              minimizeWindow,
             });
     if (result.storedScreenshot) {
       useScreenshotsStore.getState().prepend(result.storedScreenshot);
