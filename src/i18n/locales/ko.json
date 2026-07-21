@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "새 캡처에 마우스 포인터를 그립니다.",
     "screenshotsShortcuts": "전역 캡처 단축키",
     "screenshotsShortcutsHint": "이 단축키는 KKTerm이 실행 중인 동안(트레이에 숨겨져 있을 때 포함) 시스템 전체에서 작동합니다.",
+    "screenshotsEditorShortcuts": "스크린샷 편집기",
+    "screenshotsEditorShortcutsHint": "이 단축키는 스크린샷 편집기가 열려 있는 동안 작동합니다.",
     "screenshotsSaved": "스크린샷 설정을 저장했습니다.",
     "sectionAbout": "정보",
     "generalDefaults": "워크스페이스 기본값",

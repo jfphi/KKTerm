@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "วาดตัวชี้เมาส์ลงในภาพที่จับใหม่",
     "screenshotsShortcuts": "ปุ่มลัดจับภาพส่วนกลาง",
     "screenshotsShortcutsHint": "ปุ่มลัดเหล่านี้ทำงานทั่วทั้งระบบขณะ KKTerm กำลังทำงาน รวมถึงตอนซ่อนอยู่ในถาดระบบ",
+    "screenshotsEditorShortcuts": "ตัวแก้ไขภาพหน้าจอ",
+    "screenshotsEditorShortcutsHint": "ปุ่มลัดเหล่านี้ทำงานขณะเปิดตัวแก้ไขภาพหน้าจอ",
     "screenshotsSaved": "บันทึกการตั้งค่าภาพหน้าจอแล้ว",
     "sectionAbout": "เกี่ยวกับ",
     "generalDefaults": "ค่าเริ่มต้นพื้นที่ทำงาน",

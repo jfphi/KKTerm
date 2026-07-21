@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "新しいキャプチャにマウスポインターを描画します。",
     "screenshotsShortcuts": "グローバルキャプチャショートカット",
     "screenshotsShortcutsHint": "これらのショートカットは、KKTerm の実行中(トレイに隠れている間も)システム全体で機能します。",
+    "screenshotsEditorShortcuts": "スクリーンショットエディター",
+    "screenshotsEditorShortcutsHint": "これらのショートカットは、スクリーンショットエディターが開いている間に機能します。",
     "screenshotsSaved": "スクリーンショット設定を保存しました。",
     "sectionAbout": "について",
     "generalDefaults": "ワークスペースのデフォルト",

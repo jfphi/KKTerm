@@ -2010,6 +2010,8 @@
     "screenshotsIncludeCursorHint": "將滑鼠游標繪製到新擷取的影像中。",
     "screenshotsShortcuts": "全域擷取快速鍵",
     "screenshotsShortcutsHint": "這些快速鍵在 KKTerm 執行期間全域有效,包括隱藏到系統匣時。",
+    "screenshotsEditorShortcuts": "螢幕截圖編輯器",
+    "screenshotsEditorShortcutsHint": "這些快速鍵在螢幕截圖編輯器開啟時有效。",
     "screenshotsSaved": "已儲存螢幕截圖設定。",
     "sectionAbout": "關於",
     "generalDefaults": "工作區預設值",
