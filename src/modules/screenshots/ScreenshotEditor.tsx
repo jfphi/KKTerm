@@ -600,6 +600,7 @@ export function ScreenshotEditor({
   const shortcutOverrides = useWorkspaceStore((state) => state.generalSettings.workspaceShortcuts);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const undoRef = useRef<EditorSnapshot[]>([]);
   const annotationsRef = useRef<Annotation[]>([]);
@@ -721,6 +722,10 @@ export function ScreenshotEditor({
       }
     }
   }
+
+  useEffect(() => {
+    workspaceRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -1702,6 +1707,7 @@ export function ScreenshotEditor({
         }
       >
         <div
+          ref={workspaceRef}
           className="screenshots-editor__workspace"
           tabIndex={-1}
           onKeyDown={(event) => {
