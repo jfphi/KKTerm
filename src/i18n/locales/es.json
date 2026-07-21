@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "Sitios, salas de servidores, racks, hosts, tareas, automatizaciones e historial de ejecuciones.",
     "segment_assistant": "Asistente IA",
     "segmentDesc_assistant": "Historial de chat y memorias del Asistente IA.",
+    "segment_workspacesConnections": "Espacios de trabajo y conexiones",
+    "segmentDesc_workspacesConnections": "Lista de espacios de trabajo con sus conexiones, carpetas y etiquetas. Las contraseñas solo se incluyen si lo eliges abajo.",
     "segment_credentials": "Contraseñas",
     "aiProvider": "Proveedor de IA",
     "provider": "Proveedor",

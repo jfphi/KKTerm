@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "サイト、サーバールーム、ラック、ホスト、タスク、オートメーション、実行履歴。",
     "segment_assistant": "AIアシスタント",
     "segmentDesc_assistant": "AIアシスタントのチャット履歴とメモリ。",
+    "segment_workspacesConnections": "ワークスペースと接続",
+    "segmentDesc_workspacesConnections": "ワークスペースの一覧と、その中の接続・フォルダー・タグ。パスワードは下で含める場合のみ含まれます。",
     "segment_credentials": "パスワード",
     "aiProvider": "AIプロバイダー",
     "provider": "プロバイダー",

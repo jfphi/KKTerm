@@ -18,7 +18,7 @@ import {
 } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
 import type { CreatedPortableCopy } from "../../types";
-import { EXPORT_SEGMENTS } from "./SelectiveExportDialog";
+import { EXPORT_GROUPS } from "./SelectiveExportDialog";
 
 type WizardStep = "content" | "destination" | "complete";
 
@@ -27,22 +27,18 @@ export function PortableCreatorDialog({ onClose }: { onClose: () => void }) {
   const showStatusBarNotice = useWorkspaceStore((state) => state.showStatusBarNotice);
   const [step, setStep] = useState<WizardStep>("content");
   const [selected, setSelected] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(EXPORT_SEGMENTS.map((segment) => [segment.id, true])),
+    Object.fromEntries(EXPORT_GROUPS.map((group) => [group.id, true])),
   );
   const [destination, setDestination] = useState("");
   const [created, setCreated] = useState<CreatedPortableCopy | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const chosenSegments = EXPORT_SEGMENTS
-    .filter((segment) => selected[segment.id])
-    .map((segment) => segment.id);
+  const chosenSegments = EXPORT_GROUPS
+    .filter((group) => selected[group.id])
+    .flatMap((group) => group.segments);
 
-  function setSegment(id: string, enabled: boolean) {
-    setSelected((previous) => ({
-      ...previous,
-      [id]: enabled,
-      ...(id === "connections" && enabled ? { workspaces: true } : {}),
-    }));
+  function setGroup(id: string, enabled: boolean) {
+    setSelected((previous) => ({ ...previous, [id]: enabled }));
   }
 
   async function chooseDestination() {
@@ -169,20 +165,19 @@ export function PortableCreatorDialog({ onClose }: { onClose: () => void }) {
             <p className="kk-dlg-step">{t("settings.portableCreatorStepContent")}</p>
             <p className="kk-dlg-note">{t("settings.portableCreatorIntro")}</p>
             <Group title={t("settings.portableCreatorChooseData")}>
-              {EXPORT_SEGMENTS.map((segment) => (
+              {EXPORT_GROUPS.map((group) => (
                 <GRow
-                  key={segment.id}
-                  icon={segment.icon}
-                  label={t(`settings.segment_${segment.id}`)}
-                  desc={segment.id === "connections"
+                  key={group.id}
+                  icon={group.icon}
+                  label={t(`settings.segment_${group.id}`)}
+                  desc={group.id === "workspacesConnections"
                     ? t("settings.portableCreatorConnectionsDesc")
-                    : t(`settings.segmentDesc_${segment.id}`)}
+                    : t(`settings.segmentDesc_${group.id}`)}
                   control={
                     <Switch
-                      on={Boolean(selected[segment.id])}
-                      disabled={segment.id === "workspaces" && Boolean(selected.connections)}
-                      ariaLabel={t(`settings.segment_${segment.id}`)}
-                      onChange={(enabled) => setSegment(segment.id, enabled)}
+                      on={Boolean(selected[group.id])}
+                      ariaLabel={t(`settings.segment_${group.id}`)}
+                      onChange={(enabled) => setGroup(group.id, enabled)}
                     />
                   }
                 />

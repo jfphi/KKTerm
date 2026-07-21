@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "站台、機房、機櫃、主機、任務、自動化與執行記錄。",
     "segment_assistant": "AI 助理",
     "segmentDesc_assistant": "AI 助理的聊天記錄與記憶。",
+    "segment_workspacesConnections": "工作區與連線",
+    "segmentDesc_workspacesConnections": "工作區清單及其中的連線、資料夾與標籤。密碼僅在下方選擇包含時才會隨附。",
     "segment_credentials": "密碼",
     "aiProvider": "AI 提供者",
     "provider": "提供者",

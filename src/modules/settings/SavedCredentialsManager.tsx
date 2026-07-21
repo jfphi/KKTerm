@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Plus, Trash2 } from "../../lib/reicon";
+import { Plus, Trash2 } from "../../lib/reicon";
 import { ConfirmSheet } from "../../app/ui/dialog";
 import { invokeCommand, isTauriRuntime } from "../../lib/tauri";
 import { useWorkspaceStore } from "../../store";
@@ -215,25 +215,41 @@ export function SavedCredentialsManager({
         <div className="settings-credential-group">
           <h3>{t("settings.perConnectionPasswords")}</h3>
           <p className="field-hint">{t("settings.perConnectionPasswordsHint")}</p>
-          <div className="settings-list" aria-label={t("settings.perConnectionPasswords")}>
+          <div
+            className="settings-saved-credential-grid is-legacy"
+            role="grid"
+            aria-label={t("settings.perConnectionPasswords")}
+          >
+            <div className="settings-saved-credential-grid-header" role="row">
+              <span role="columnheader">{t("settings.savedCredentialName")}</span>
+              <span role="columnheader">{t("settings.credentialColumnDetails")}</span>
+              <span role="columnheader">{t("settings.savedCredentialUsername")}</span>
+              <span aria-hidden="true" />
+            </div>
             {legacyCredentials.map((credential) => (
-              <div className="settings-list-row" key={credential.id}>
-                <div className="settings-credential-summary">
-                  <strong>{credential.label}</strong>
-                  <span>
-                    {credential.detail}
-                    {credential.username ? ` · ${credential.username}` : ""}
-                    {credential.exists ? "" : ` · ${t("settings.credentialMissingSecret")}`}
-                  </span>
+              <div className="settings-saved-credential-grid-row" key={credential.id} role="row">
+                <div className="settings-saved-credential-grid-cell is-name" role="gridcell">
+                  <strong title={credential.label}>{credential.label}</strong>
+                  {!credential.exists ? (
+                    <small>{t("settings.credentialMissingSecret")}</small>
+                  ) : null}
                 </div>
-                <div className="settings-list-actions">
+                <div className="settings-saved-credential-grid-cell" role="gridcell">
+                  <span title={credential.detail}>{credential.detail || "—"}</span>
+                </div>
+                <div className="settings-saved-credential-grid-cell" role="gridcell">
+                  <span title={credential.username}>{credential.username || "—"}</span>
+                </div>
+                <div
+                  className="settings-saved-credential-grid-actions is-legacy"
+                  role="gridcell"
+                >
                   <button
                     className="secondary-button"
                     disabled={!credential.exists}
                     type="button"
                     onClick={() => setConvertTarget(credential)}
                   >
-                    <Link size={15} />
                     {t("settings.savedCredentialConvert")}
                   </button>
                   <button

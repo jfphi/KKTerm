@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "Situs, ruang server, rak, host, tugas, automasi, dan riwayat eksekusi.",
     "segment_assistant": "AI Assistant",
     "segmentDesc_assistant": "Riwayat obrolan dan memori AI Assistant.",
+    "segment_workspacesConnections": "Ruang kerja dan koneksi",
+    "segmentDesc_workspacesConnections": "Daftar ruang kerja beserta koneksi, folder, dan tag di dalamnya. Kata sandi hanya disertakan bila dipilih di bawah.",
     "segment_credentials": "Kata sandi",
     "aiProvider": "Penyedia AI",
     "provider": "Penyedia",
