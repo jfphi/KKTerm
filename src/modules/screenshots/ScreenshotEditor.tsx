@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +19,7 @@ import {
   Grid2x2,
   Hand,
   Maximize2,
+  MousePointer2,
   RotateCcw,
   Square,
   Trash2,
@@ -31,34 +33,90 @@ import {
   ConfirmSheet,
   DialogShell,
   Sheet,
-  TextInput,
 } from "../../app/ui/dialog";
 import { ColorPalettePicker } from "../../app/ui/ColorPalettePicker";
+import { writeToClipboard } from "../../lib/clipboard";
+import {
+  showNativeContextMenu,
+  type NativeContextMenuItem,
+} from "../../lib/nativeContextMenu";
 import { invokeCommand, type FullScreenshot, type StoredScreenshot } from "../../lib/tauri";
 import { formatScreenshotBytes } from "./LibraryView";
 import { fitImageDimensions } from "./editorSizing";
 
-type EditorTool = "pan" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic";
+type EditorTool = "pan" | "select" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic";
+type ShapeKind = "arrow" | "rectangle" | "ellipse";
 type Point = { x: number; y: number };
+type Rect = { x: number; y: number; width: number; height: number };
 type ZoomLevel = "fit" | number;
 type TextFont = "app" | "sans-serif" | "serif" | "monospace";
 type PendingEditorAction = "close" | -1 | 1;
 type EditorSaveMode = "overwrite" | "copy";
 
+type ShapeAnnotation = {
+  id: number;
+  kind: ShapeKind;
+  start: Point;
+  end: Point;
+  color: string;
+  stroke: number;
+};
+type MosaicAnnotation = { id: number; kind: "mosaic"; start: Point; end: Point };
+type TextAnnotation = {
+  id: number;
+  kind: "text";
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  size: number;
+  font: TextFont;
+  bold: boolean;
+  italic: boolean;
+};
+type Annotation = ShapeAnnotation | MosaicAnnotation | TextAnnotation;
+type TextDraft = {
+  id: number | null;
+  x: number;
+  y: number;
+  draft: string;
+  color: string;
+  size: number;
+  font: TextFont;
+  bold: boolean;
+  italic: boolean;
+};
+type SelectionHandle = "nw" | "ne" | "sw" | "se" | "start" | "end";
+
 const ZOOM_STEPS = [25, 50, 75, 100, 125, 150, 200] as const;
 const FIT_PADDING = 18;
+const TEXT_LINE_HEIGHT = 1.25;
+const UNDO_LIMIT = 50;
 const EDITOR_TOOLS: Array<{
   id: EditorTool;
   icon: typeof ArrowRight;
   key: string;
 }> = [
   { id: "pan", icon: Hand, key: "screenshots.editor.pan" },
+  { id: "select", icon: MousePointer2, key: "screenshots.editor.select" },
   { id: "arrow", icon: ArrowRight, key: "screenshots.editor.arrow" },
   { id: "rectangle", icon: Square, key: "screenshots.editor.rectangle" },
   { id: "ellipse", icon: Circle, key: "screenshots.editor.ellipse" },
   { id: "text", icon: Type, key: "screenshots.editor.text" },
   { id: "mosaic", icon: Grid2x2, key: "screenshots.editor.mosaic" },
 ];
+const STROKE_OPTIONS = [
+  { width: 2, dot: 3, key: "screenshots.editor.strokeThin" },
+  { width: 4, dot: 6, key: "screenshots.editor.strokeMedium" },
+  { width: 7, dot: 9, key: "screenshots.editor.strokeThick" },
+] as const;
+const TEXT_FONTS: TextFont[] = ["app", "sans-serif", "serif", "monospace"];
+const TEXT_FONT_KEYS: Record<TextFont, string> = {
+  app: "screenshots.editor.appFont",
+  "sans-serif": "screenshots.editor.sansSerif",
+  serif: "screenshots.editor.serif",
+  monospace: "screenshots.editor.monospace",
+};
 
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): Point {
   const rect = canvas.getBoundingClientRect();
@@ -68,8 +126,22 @@ function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number
   };
 }
 
-function annotationColor() {
-  return getComputedStyle(document.documentElement).getPropertyValue("--red").trim() || "red";
+function cssToken(name: string, fallback: string) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+// Swatches are canvas ink baked into the exported image, not themed UI chrome;
+// black/white have no scheme token, and token fallbacks only cover a missing
+// computed style.
+function annotationSwatches() {
+  return [
+    { key: "screenshots.editor.colorRed", value: cssToken("--red", "#ff453a") },
+    { key: "screenshots.editor.colorOrange", value: cssToken("--amber", "#ff9f0a") },
+    { key: "screenshots.editor.colorGreen", value: cssToken("--green", "#34c759") },
+    { key: "screenshots.editor.colorBlue", value: cssToken("--accent", "#0a84ff") },
+    { key: "screenshots.editor.colorBlack", value: "#111111" },
+    { key: "screenshots.editor.colorWhite", value: "#ffffff" },
+  ];
 }
 
 function annotationFontFamily() {
@@ -80,6 +152,158 @@ function annotationFontFamily() {
 
 function resolvedTextFont(font: TextFont) {
   return font === "app" ? annotationFontFamily() : font;
+}
+
+function textFontString(size: number, font: TextFont, bold: boolean, italic: boolean) {
+  return `${italic ? "italic " : ""}${bold ? 700 : 400} ${size}px ${resolvedTextFont(font)}`;
+}
+
+function lineWidthFor(canvasWidth: number, stroke: number) {
+  return stroke * Math.max(1, canvasWidth / 1560);
+}
+
+function normalizedRect(start: Point, end: Point): Rect {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function expandRect(rect: Rect, pad: number): Rect {
+  return {
+    x: rect.x - pad,
+    y: rect.y - pad,
+    width: rect.width + pad * 2,
+    height: rect.height + pad * 2,
+  };
+}
+
+function pointInRect(point: Point, rect: Rect, tolerance: number) {
+  return (
+    point.x >= rect.x - tolerance
+    && point.x <= rect.x + rect.width + tolerance
+    && point.y >= rect.y - tolerance
+    && point.y <= rect.y + rect.height + tolerance
+  );
+}
+
+function distanceToSegment(point: Point, a: Point, b: Point) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0
+    ? 0
+    : Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+function textBounds(context: CanvasRenderingContext2D, annotation: {
+  x: number;
+  y: number;
+  text: string;
+  size: number;
+  font: TextFont;
+  bold: boolean;
+  italic: boolean;
+}): Rect {
+  context.save();
+  context.font = textFontString(annotation.size, annotation.font, annotation.bold, annotation.italic);
+  let width = 0;
+  const lines = annotation.text.split("\n");
+  for (const line of lines) {
+    width = Math.max(width, context.measureText(line).width);
+  }
+  context.restore();
+  return {
+    x: annotation.x,
+    y: annotation.y,
+    width: Math.max(width, annotation.size / 2),
+    height: lines.length * annotation.size * TEXT_LINE_HEIGHT,
+  };
+}
+
+function annotationBounds(context: CanvasRenderingContext2D, annotation: Annotation): Rect {
+  if (annotation.kind === "text") {
+    return textBounds(context, annotation);
+  }
+  const rect = normalizedRect(annotation.start, annotation.end);
+  if (annotation.kind === "mosaic") {
+    return rect;
+  }
+  return expandRect(rect, lineWidthFor(context.canvas.width, annotation.stroke) / 2);
+}
+
+function hitTest(
+  context: CanvasRenderingContext2D,
+  annotations: Annotation[],
+  point: Point,
+  tolerance: number,
+): Annotation | null {
+  for (let index = annotations.length - 1; index >= 0; index -= 1) {
+    const annotation = annotations[index];
+    if (annotation.kind === "arrow") {
+      const reach = tolerance + lineWidthFor(context.canvas.width, annotation.stroke) / 2;
+      if (distanceToSegment(point, annotation.start, annotation.end) <= reach) {
+        return annotation;
+      }
+      continue;
+    }
+    if (pointInRect(point, annotationBounds(context, annotation), tolerance)) {
+      return annotation;
+    }
+  }
+  return null;
+}
+
+function translateAnnotation(annotation: Annotation, dx: number, dy: number): Annotation {
+  if (annotation.kind === "text") {
+    return { ...annotation, x: annotation.x + dx, y: annotation.y + dy };
+  }
+  return {
+    ...annotation,
+    start: { x: annotation.start.x + dx, y: annotation.start.y + dy },
+    end: { x: annotation.end.x + dx, y: annotation.end.y + dy },
+  };
+}
+
+function rectCornerAnchor(rect: Rect, handle: SelectionHandle): Point {
+  return {
+    x: handle === "nw" || handle === "sw" ? rect.x + rect.width : rect.x,
+    y: handle === "nw" || handle === "ne" ? rect.y + rect.height : rect.y,
+  };
+}
+
+function resizeAnnotation(
+  context: CanvasRenderingContext2D,
+  original: Annotation,
+  handle: SelectionHandle,
+  point: Point,
+): Annotation {
+  if (original.kind !== "text") {
+    if (handle === "start" || handle === "end") {
+      return { ...original, [handle]: point };
+    }
+    const rect = normalizedRect(original.start, original.end);
+    return { ...original, start: rectCornerAnchor(rect, handle), end: point };
+  }
+  if (handle === "start" || handle === "end") {
+    return original;
+  }
+  const bounds = textBounds(context, original);
+  const anchor = rectCornerAnchor(bounds, handle);
+  const ratio = bounds.width > 0
+    ? Math.max(0.05, Math.abs(point.x - anchor.x) / bounds.width)
+    : 1;
+  const size = Math.min(512, Math.max(8, Math.round(original.size * ratio)));
+  const applied = size / original.size;
+  return {
+    ...original,
+    size,
+    x: handle === "nw" || handle === "sw" ? anchor.x - bounds.width * applied : anchor.x,
+    y: handle === "nw" || handle === "ne" ? anchor.y - bounds.height * applied : anchor.y,
+  };
 }
 
 function initialEditorSize() {
@@ -100,20 +324,21 @@ function MultipleFloppy({ size = 15 }: { size?: number }) {
 
 function drawShape(
   context: CanvasRenderingContext2D,
-  tool: Exclude<EditorTool, "pan" | "text" | "mosaic">,
+  kind: ShapeKind,
   start: Point,
   end: Point,
+  color: string,
+  lineWidth: number,
 ) {
-  const lineWidth = Math.max(3, context.canvas.width / 520);
   context.save();
-  context.strokeStyle = annotationColor();
-  context.fillStyle = annotationColor();
+  context.strokeStyle = color;
+  context.fillStyle = color;
   context.lineWidth = lineWidth;
   context.lineCap = "round";
   context.lineJoin = "round";
-  if (tool === "rectangle") {
+  if (kind === "rectangle") {
     context.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
-  } else if (tool === "ellipse") {
+  } else if (kind === "ellipse") {
     context.beginPath();
     context.ellipse(
       (start.x + end.x) / 2,
@@ -148,6 +373,17 @@ function drawShape(
   context.restore();
 }
 
+function drawText(context: CanvasRenderingContext2D, annotation: TextAnnotation) {
+  context.save();
+  context.fillStyle = annotation.color;
+  context.font = textFontString(annotation.size, annotation.font, annotation.bold, annotation.italic);
+  context.textBaseline = "top";
+  annotation.text.split("\n").forEach((line, index) => {
+    context.fillText(line, annotation.x, annotation.y + index * annotation.size * TEXT_LINE_HEIGHT);
+  });
+  context.restore();
+}
+
 function mosaicRegion(context: CanvasRenderingContext2D, start: Point, end: Point) {
   const x = Math.max(0, Math.floor(Math.min(start.x, end.x)));
   const y = Math.max(0, Math.floor(Math.min(start.y, end.y)));
@@ -173,6 +409,23 @@ function mosaicRegion(context: CanvasRenderingContext2D, start: Point, end: Poin
   context.imageSmoothingEnabled = false;
   context.drawImage(tiny, 0, 0, tiny.width, tiny.height, x, y, width, height);
   context.restore();
+}
+
+function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotation) {
+  if (annotation.kind === "text") {
+    drawText(context, annotation);
+  } else if (annotation.kind === "mosaic") {
+    mosaicRegion(context, annotation.start, annotation.end);
+  } else {
+    drawShape(
+      context,
+      annotation.kind,
+      annotation.start,
+      annotation.end,
+      annotation.color,
+      lineWidthFor(context.canvas.width, annotation.stroke),
+    );
+  }
 }
 
 export function ScreenshotEditor({
@@ -202,9 +455,27 @@ export function ScreenshotEditor({
 }) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const baseRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const undoRef = useRef<ImageData[]>([]);
-  const drawingRef = useRef<{ start: Point; before: ImageData } | null>(null);
+  const undoRef = useRef<Annotation[][]>([]);
+  const annotationsRef = useRef<Annotation[]>([]);
+  const editingRef = useRef<TextDraft | null>(null);
+  const idRef = useRef(1);
+  const drawingRef = useRef<{ start: Point } | null>(null);
+  const moveDragRef = useRef<{
+    pointerId: number;
+    id: number;
+    origin: Point;
+    before: Annotation[];
+    moved: boolean;
+  } | null>(null);
+  const handleDragRef = useRef<{
+    pointerId: number;
+    handle: SelectionHandle;
+    original: Annotation;
+    before: Annotation[];
+    changed: boolean;
+  } | null>(null);
   const panRef = useRef<{
     pointerId: number;
     startX: number;
@@ -220,32 +491,66 @@ export function ScreenshotEditor({
     height: number;
   } | null>(null);
   const [tool, setTool] = useState<EditorTool>("arrow");
-  const [textValue, setTextValue] = useState("");
-  const [textFont, setTextFont] = useState<TextFont>("app");
+  const [swatches] = useState(annotationSwatches);
+  const [color, setColor] = useState(swatches[0].value);
+  const [stroke, setStroke] = useState<number>(STROKE_OPTIONS[1].width);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [editing, setEditing] = useState<TextDraft | null>(null);
   const [textSize, setTextSize] = useState(32);
-  const [textColor, setTextColor] = useState(annotationColor);
-  const [textBold, setTextBold] = useState(true);
-  const [textFormatOpen, setTextFormatOpen] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: screenshot.width, height: screenshot.height });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [editorSize, setEditorSize] = useState(initialEditorSize);
   const [zoom, setZoom] = useState<ZoomLevel>("fit");
   const [ready, setReady] = useState(false);
-  const [dirty, setDirty] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingEditorAction | null>(null);
+  const dirty = annotations.length > 0;
+  const editingId = editing?.id ?? null;
+
+  function applyAnnotations(next: Annotation[]) {
+    annotationsRef.current = next;
+    setAnnotations(next);
+  }
+
+  function applyEditing(next: TextDraft | null) {
+    editingRef.current = next;
+    setEditing(next);
+  }
+
+  function renderCanvas() {
+    const canvas = canvasRef.current;
+    const base = baseRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !base || !context) {
+      return;
+    }
+    context.drawImage(base, 0, 0);
+    const hiddenId = editingRef.current?.id ?? null;
+    for (const annotation of annotationsRef.current) {
+      if (annotation.id !== hiddenId) {
+        drawAnnotation(context, annotation);
+      }
+    }
+  }
 
   useEffect(() => {
     let disposed = false;
     setReady(false);
-    setDirty(false);
     setSaving(false);
     setPendingAction(null);
     setZoom("fit");
     setUndoCount(0);
+    setSelectedId(null);
     undoRef.current = [];
+    annotationsRef.current = [];
+    setAnnotations([]);
+    editingRef.current = null;
+    setEditing(null);
     drawingRef.current = null;
+    moveDragRef.current = null;
+    handleDragRef.current = null;
     panRef.current = null;
     invokeCommand("read_screenshot", { id: screenshot.id })
       .then((full: FullScreenshot) => {
@@ -254,6 +559,11 @@ export function ScreenshotEditor({
           if (disposed || !canvasRef.current) {
             return;
           }
+          const base = document.createElement("canvas");
+          base.width = full.width;
+          base.height = full.height;
+          base.getContext("2d")?.drawImage(image, 0, 0);
+          baseRef.current = base;
           const canvas = canvasRef.current;
           canvas.width = full.width;
           canvas.height = full.height;
@@ -289,22 +599,299 @@ export function ScreenshotEditor({
     return () => observer.disconnect();
   }, []);
 
-  function pushUndo(before: ImageData) {
-    undoRef.current = [...undoRef.current.slice(-5), before];
+  useEffect(() => {
+    if (ready) {
+      renderCanvas();
+    }
+  }, [ready, annotations, editingId]);
+
+  function pushUndo(before: Annotation[]) {
+    undoRef.current = [...undoRef.current.slice(-(UNDO_LIMIT - 1)), before];
     setUndoCount(undoRef.current.length);
-    setDirty(true);
   }
 
   function undo() {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    const previous = undoRef.current.pop();
-    if (!canvas || !context || !previous) {
+    if (editingRef.current) {
       return;
     }
-    context.putImageData(previous, 0, 0);
+    const previous = undoRef.current.pop();
+    if (!previous) {
+      return;
+    }
     setUndoCount(undoRef.current.length);
-    setDirty(undoRef.current.length > 0);
+    applyAnnotations(previous);
+    setSelectedId((current) => (
+      current !== null && previous.some((annotation) => annotation.id === current) ? current : null
+    ));
+  }
+
+  function annotationById(id: number | null) {
+    return id === null
+      ? null
+      : annotationsRef.current.find((annotation) => annotation.id === id) ?? null;
+  }
+
+  function updateAnnotationWithUndo(id: number, updater: (annotation: Annotation) => Annotation) {
+    const before = annotationsRef.current;
+    if (!before.some((annotation) => annotation.id === id)) {
+      return;
+    }
+    pushUndo(before);
+    applyAnnotations(before.map((annotation) => (
+      annotation.id === id ? updater(annotation) : annotation
+    )));
+  }
+
+  function deleteAnnotation(id: number) {
+    const before = annotationsRef.current;
+    if (!before.some((annotation) => annotation.id === id)) {
+      return;
+    }
+    pushUndo(before);
+    applyAnnotations(before.filter((annotation) => annotation.id !== id));
+    setSelectedId((current) => (current === id ? null : current));
+  }
+
+  function applyColor(next: string) {
+    setColor(next);
+    const draft = editingRef.current;
+    if (draft) {
+      applyEditing({ ...draft, color: next });
+      return;
+    }
+    if (tool === "select" && selectedId !== null) {
+      const target = annotationById(selectedId);
+      if (target && target.kind !== "mosaic") {
+        updateAnnotationWithUndo(selectedId, (annotation) => ({ ...annotation, color: next }));
+      }
+    }
+  }
+
+  function applyStroke(next: number) {
+    setStroke(next);
+    if (tool === "select" && selectedId !== null) {
+      const target = annotationById(selectedId);
+      if (target && target.kind !== "mosaic" && target.kind !== "text") {
+        updateAnnotationWithUndo(selectedId, (annotation) => ({ ...annotation, stroke: next }));
+      }
+    }
+  }
+
+  function startTextDraft(point: Point) {
+    setSelectedId(null);
+    applyEditing({
+      id: null,
+      x: point.x,
+      y: point.y,
+      draft: "",
+      color,
+      size: textSize,
+      font: "app",
+      bold: true,
+      italic: false,
+    });
+  }
+
+  function editTextAnnotation(annotation: TextAnnotation) {
+    setSelectedId(annotation.id);
+    applyEditing({
+      id: annotation.id,
+      x: annotation.x,
+      y: annotation.y,
+      draft: annotation.text,
+      color: annotation.color,
+      size: annotation.size,
+      font: annotation.font,
+      bold: annotation.bold,
+      italic: annotation.italic,
+    });
+  }
+
+  function commitTextDraft() {
+    const draft = editingRef.current;
+    if (!draft) {
+      return;
+    }
+    applyEditing(null);
+    const before = annotationsRef.current;
+    if (!draft.draft.trim()) {
+      if (draft.id !== null) {
+        pushUndo(before);
+        applyAnnotations(before.filter((annotation) => annotation.id !== draft.id));
+        setSelectedId(null);
+      }
+      return;
+    }
+    if (draft.id !== null) {
+      const original = before.find((annotation) => annotation.id === draft.id);
+      if (
+        original?.kind === "text"
+        && original.text === draft.draft
+        && original.color === draft.color
+        && original.size === draft.size
+        && original.font === draft.font
+        && original.bold === draft.bold
+        && original.italic === draft.italic
+      ) {
+        return;
+      }
+      pushUndo(before);
+      applyAnnotations(before.map((annotation) => (
+        annotation.id === draft.id
+          ? {
+              id: annotation.id,
+              kind: "text" as const,
+              x: draft.x,
+              y: draft.y,
+              text: draft.draft,
+              color: draft.color,
+              size: draft.size,
+              font: draft.font,
+              bold: draft.bold,
+              italic: draft.italic,
+            }
+          : annotation
+      )));
+      return;
+    }
+    const id = idRef.current++;
+    pushUndo(before);
+    applyAnnotations([
+      ...before,
+      {
+        id,
+        kind: "text",
+        x: draft.x,
+        y: draft.y,
+        text: draft.draft,
+        color: draft.color,
+        size: draft.size,
+        font: draft.font,
+        bold: draft.bold,
+        italic: draft.italic,
+      },
+    ]);
+  }
+
+  function discardEditingTarget() {
+    const draft = editingRef.current;
+    applyEditing(null);
+    if (draft?.id !== null && draft?.id !== undefined) {
+      deleteAnnotation(draft.id);
+    }
+  }
+
+  function checkLabel(label: string, active: boolean) {
+    return active ? `✓ ${label}` : label;
+  }
+
+  function fontSizeChoices(current: number) {
+    const sizes = [0.5, 0.75, 1, 1.5, 2, 3].map((multiple) => Math.round(textSize * multiple));
+    sizes.push(current);
+    return [...new Set(sizes)].sort((a, b) => a - b);
+  }
+
+  function textMenuItems(
+    current: { text: string; bold: boolean; italic: boolean; size: number; font: TextFont },
+    apply: (patch: Partial<Pick<TextDraft, "bold" | "italic" | "size" | "font">>) => void,
+    remove: () => void,
+  ): NativeContextMenuItem[] {
+    return [
+      {
+        kind: "item",
+        label: checkLabel(t("screenshots.editor.bold"), current.bold),
+        action: () => apply({ bold: !current.bold }),
+      },
+      {
+        kind: "item",
+        label: checkLabel(t("screenshots.editor.italic"), current.italic),
+        action: () => apply({ italic: !current.italic }),
+      },
+      {
+        kind: "submenu",
+        label: t("workspace.fileViewer.fontSize"),
+        items: fontSizeChoices(current.size).map((size) => ({
+          kind: "item" as const,
+          label: checkLabel(String(size), size === current.size),
+          action: () => apply({ size }),
+        })),
+      },
+      {
+        kind: "submenu",
+        label: t("workspace.fileViewer.font"),
+        items: TEXT_FONTS.map((font) => ({
+          kind: "item" as const,
+          label: checkLabel(t(TEXT_FONT_KEYS[font]), font === current.font),
+          action: () => apply({ font }),
+        })),
+      },
+      { kind: "separator" },
+      {
+        kind: "item",
+        label: t("common.cut"),
+        action: () => {
+          void writeToClipboard(current.text);
+          remove();
+        },
+      },
+      {
+        kind: "item",
+        label: t("common.copy"),
+        action: () => {
+          void writeToClipboard(current.text);
+        },
+      },
+      { kind: "separator" },
+      { kind: "item", label: t("common.delete"), action: remove },
+    ];
+  }
+
+  function editingContextMenu(event: ReactMouseEvent<HTMLTextAreaElement>) {
+    event.preventDefault();
+    const draft = editingRef.current;
+    if (!draft) {
+      return;
+    }
+    void showNativeContextMenu(
+      textMenuItems(
+        { text: draft.draft, bold: draft.bold, italic: draft.italic, size: draft.size, font: draft.font },
+        (patch) => {
+          const current = editingRef.current;
+          if (current) {
+            applyEditing({ ...current, ...patch });
+          }
+        },
+        discardEditingTarget,
+      ),
+      { x: event.clientX, y: event.clientY },
+    );
+  }
+
+  function canvasContextMenu(event: ReactMouseEvent<HTMLCanvasElement>) {
+    event.preventDefault();
+    if (!ready || saving || editingRef.current || tool !== "select") {
+      return;
+    }
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    const point = canvasPoint(canvas, event.clientX, event.clientY);
+    const tolerance = 8 * (canvas.width / Math.max(1, canvas.getBoundingClientRect().width));
+    const hit = hitTest(context, annotationsRef.current, point, tolerance);
+    if (!hit) {
+      return;
+    }
+    setSelectedId(hit.id);
+    const items: NativeContextMenuItem[] = hit.kind === "text"
+      ? textMenuItems(
+          hit,
+          (patch) => updateAnnotationWithUndo(hit.id, (annotation) => ({ ...annotation, ...patch })),
+          () => deleteAnnotation(hit.id),
+        )
+      : [{ kind: "item", label: t("common.delete"), action: () => deleteAnnotation(hit.id) }];
+    void showNativeContextMenu(items, { x: event.clientX, y: event.clientY });
   }
 
   function stepZoom(direction: -1 | 1) {
@@ -318,7 +905,7 @@ export function ScreenshotEditor({
   function pointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
     const canvas = event.currentTarget;
     const context = canvas.getContext("2d");
-    if (!context || !ready) {
+    if (!context || !ready || event.button !== 0) {
       return;
     }
     if (tool === "pan") {
@@ -337,23 +924,37 @@ export function ScreenshotEditor({
       };
       return;
     }
-    const start = canvasPoint(canvas, event.clientX, event.clientY);
-    const before = context.getImageData(0, 0, canvas.width, canvas.height);
+    const point = canvasPoint(canvas, event.clientX, event.clientY);
     if (tool === "text") {
-      if (!textValue.trim()) {
+      if (editingRef.current) {
+        commitTextDraft();
         return;
       }
-      pushUndo(before);
-      context.save();
-      context.fillStyle = textColor;
-      context.font = `${textBold ? 700 : 400} ${textSize}px ${resolvedTextFont(textFont)}`;
-      context.textBaseline = "top";
-      context.fillText(textValue.trim(), start.x, start.y);
-      context.restore();
+      startTextDraft(point);
+      return;
+    }
+    if (editingRef.current) {
+      commitTextDraft();
+    }
+    if (tool === "select") {
+      const tolerance = 8 * (canvas.width / Math.max(1, canvas.getBoundingClientRect().width));
+      const hit = hitTest(context, annotationsRef.current, point, tolerance);
+      setSelectedId(hit ? hit.id : null);
+      if (hit) {
+        event.preventDefault();
+        canvas.setPointerCapture(event.pointerId);
+        moveDragRef.current = {
+          pointerId: event.pointerId,
+          id: hit.id,
+          origin: point,
+          before: annotationsRef.current,
+          moved: false,
+        };
+      }
       return;
     }
     canvas.setPointerCapture(event.pointerId);
-    drawingRef.current = { start, before };
+    drawingRef.current = { start: point };
   }
 
   function pointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -366,14 +967,44 @@ export function ScreenshotEditor({
       }
       return;
     }
-    const drawing = drawingRef.current;
-    const context = event.currentTarget.getContext("2d");
-    if (!drawing || !context || tool === "text" || tool === "mosaic") {
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) {
       return;
     }
-    const end = canvasPoint(event.currentTarget, event.clientX, event.clientY);
-    context.putImageData(drawing.before, 0, 0);
-    drawShape(context, tool, drawing.start, end);
+    if (tool === "select") {
+      const moveDrag = moveDragRef.current;
+      if (moveDrag && moveDrag.pointerId === event.pointerId) {
+        const point = canvasPoint(canvas, event.clientX, event.clientY);
+        const dx = point.x - moveDrag.origin.x;
+        const dy = point.y - moveDrag.origin.y;
+        if (dx !== 0 || dy !== 0) {
+          moveDrag.moved = true;
+        }
+        applyAnnotations(moveDrag.before.map((annotation) => (
+          annotation.id === moveDrag.id ? translateAnnotation(annotation, dx, dy) : annotation
+        )));
+      }
+      return;
+    }
+    const drawing = drawingRef.current;
+    if (!drawing || tool === "text") {
+      return;
+    }
+    const end = canvasPoint(canvas, event.clientX, event.clientY);
+    renderCanvas();
+    if (tool === "mosaic") {
+      const cssPixel = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+      const rect = normalizedRect(drawing.start, end);
+      context.save();
+      context.strokeStyle = "rgba(127, 127, 127, 0.9)";
+      context.lineWidth = cssPixel;
+      context.setLineDash([6 * cssPixel, 4 * cssPixel]);
+      context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+      context.restore();
+    } else {
+      drawShape(context, tool, drawing.start, end, color, lineWidthFor(canvas.width, stroke));
+    }
   }
 
   function pointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -384,48 +1015,171 @@ export function ScreenshotEditor({
       }
       return;
     }
-    const drawing = drawingRef.current;
-    const context = event.currentTarget.getContext("2d");
-    if (!drawing || !context || tool === "text") {
+    if (tool === "select") {
+      const moveDrag = moveDragRef.current;
+      if (moveDrag && moveDrag.pointerId === event.pointerId) {
+        moveDragRef.current = null;
+        if (moveDrag.moved) {
+          pushUndo(moveDrag.before);
+        }
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
       return;
     }
-    const end = canvasPoint(event.currentTarget, event.clientX, event.clientY);
-    context.putImageData(drawing.before, 0, 0);
-    if (tool === "mosaic") {
-      mosaicRegion(context, drawing.start, end);
-    } else {
-      drawShape(context, tool, drawing.start, end);
+    const drawing = drawingRef.current;
+    const canvas = event.currentTarget;
+    if (!drawing || tool === "text") {
+      return;
     }
-    pushUndo(drawing.before);
     drawingRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    canvas.releasePointerCapture(event.pointerId);
+    const end = canvasPoint(canvas, event.clientX, event.clientY);
+    const rect = normalizedRect(drawing.start, end);
+    if (rect.width < 2 && rect.height < 2) {
+      renderCanvas();
+      return;
+    }
+    const before = annotationsRef.current;
+    pushUndo(before);
+    if (tool === "mosaic") {
+      applyAnnotations([
+        ...before,
+        { id: idRef.current++, kind: "mosaic", start: drawing.start, end },
+      ]);
+    } else {
+      applyAnnotations([
+        ...before,
+        { id: idRef.current++, kind: tool, start: drawing.start, end, color, stroke },
+      ]);
+    }
+  }
+
+  function pointerCancel() {
+    const moveDrag = moveDragRef.current;
+    if (moveDrag) {
+      applyAnnotations(moveDrag.before);
+    }
+    drawingRef.current = null;
+    moveDragRef.current = null;
+    panRef.current = null;
+    renderCanvas();
+  }
+
+  function canvasDoubleClick(event: ReactMouseEvent<HTMLCanvasElement>) {
+    if (tool !== "select" || !ready || editingRef.current) {
+      return;
+    }
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    const point = canvasPoint(canvas, event.clientX, event.clientY);
+    const tolerance = 8 * (canvas.width / Math.max(1, canvas.getBoundingClientRect().width));
+    const hit = hitTest(context, annotationsRef.current, point, tolerance);
+    if (hit?.kind === "text") {
+      editTextAnnotation(hit);
+    }
+  }
+
+  function beginHandleDrag(event: ReactPointerEvent<HTMLSpanElement>, handle: SelectionHandle) {
+    if (event.button !== 0) {
+      return;
+    }
+    const target = annotationById(selectedId);
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    handleDragRef.current = {
+      pointerId: event.pointerId,
+      handle,
+      original: target,
+      before: annotationsRef.current,
+      changed: false,
+    };
+  }
+
+  function handleDragMove(event: ReactPointerEvent<HTMLSpanElement>) {
+    const drag = handleDragRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!drag || drag.pointerId !== event.pointerId || !canvas || !context) {
+      return;
+    }
+    const point = canvasPoint(canvas, event.clientX, event.clientY);
+    drag.changed = true;
+    const next = resizeAnnotation(context, drag.original, drag.handle, point);
+    applyAnnotations(drag.before.map((annotation) => (
+      annotation.id === drag.original.id ? next : annotation
+    )));
+  }
+
+  function endHandleDrag(event: ReactPointerEvent<HTMLSpanElement>) {
+    const drag = handleDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    handleDragRef.current = null;
+    if (drag.changed) {
+      pushUndo(drag.before);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function exportComposite() {
+    const canvas = canvasRef.current;
+    const base = baseRef.current;
+    const output = document.createElement("canvas");
+    output.width = canvas?.width ?? canvasSize.width;
+    output.height = canvas?.height ?? canvasSize.height;
+    const context = output.getContext("2d");
+    if (!context || !base) {
+      return output;
+    }
+    context.drawImage(base, 0, 0);
+    for (const annotation of annotationsRef.current) {
+      drawAnnotation(context, annotation);
+    }
+    return output;
   }
 
   function copyEditedImage() {
-    const canvas = canvasRef.current;
-    if (!canvas || !ready || saving) {
+    if (!canvasRef.current || !ready || saving) {
       return;
     }
-    onCopyEdited(canvas.toDataURL("image/png"));
+    commitTextDraft();
+    onCopyEdited(exportComposite().toDataURL("image/png"));
   }
 
   async function save(mode: EditorSaveMode, navigateDirection?: -1 | 1) {
-    const canvas = canvasRef.current;
-    if (!canvas || !ready || (mode === "overwrite" && !dirty) || saving) {
+    if (!canvasRef.current || !ready || saving) {
+      return;
+    }
+    commitTextDraft();
+    if (mode === "overwrite" && annotationsRef.current.length === 0) {
       return;
     }
     setSaving(true);
     try {
+      const flattened = exportComposite();
       const created = await invokeCommand("save_edited_screenshot", {
         request: {
           id: screenshot.id,
-          dataUrl: canvas.toDataURL("image/png"),
+          dataUrl: flattened.toDataURL("image/png"),
           saveAsCopy: mode === "copy",
         },
       });
+      baseRef.current?.getContext("2d")?.drawImage(flattened, 0, 0);
       undoRef.current = [];
       setUndoCount(0);
-      setDirty(false);
+      applyAnnotations([]);
+      setSelectedId(null);
+      renderCanvas();
       setSaving(false);
       onSaved(created, mode, navigateDirection);
     } catch (error) {
@@ -495,6 +1249,61 @@ export function ScreenshotEditor({
         FIT_PADDING,
       )
     : null;
+  const displayWidth = scaledWidth ?? fitSize?.width ?? null;
+  const displayHeight = scaledHeight ?? fitSize?.height ?? null;
+  const displayScale = displayWidth ? displayWidth / Math.max(1, canvasSize.width) : null;
+
+  const measureContext = ready ? canvasRef.current?.getContext("2d") ?? null : null;
+  let selectionBox: { left: number; top: number; width: number; height: number } | null = null;
+  let selectionHandles: Array<{ id: SelectionHandle; left: number; top: number }> = [];
+  if (tool === "select" && selectedId !== null && displayScale && measureContext) {
+    const selected = annotations.find((annotation) => annotation.id === selectedId);
+    if (selected && editingId !== selected.id) {
+      const bounds = annotationBounds(measureContext, selected);
+      selectionBox = {
+        left: bounds.x * displayScale,
+        top: bounds.y * displayScale,
+        width: bounds.width * displayScale,
+        height: bounds.height * displayScale,
+      };
+      selectionHandles = selected.kind === "arrow"
+        ? [
+            {
+              id: "start",
+              left: (selected.start.x - bounds.x) * displayScale,
+              top: (selected.start.y - bounds.y) * displayScale,
+            },
+            {
+              id: "end",
+              left: (selected.end.x - bounds.x) * displayScale,
+              top: (selected.end.y - bounds.y) * displayScale,
+            },
+          ]
+        : [
+            { id: "nw", left: 0, top: 0 },
+            { id: "ne", left: selectionBox.width, top: 0 },
+            { id: "sw", left: 0, top: selectionBox.height },
+            { id: "se", left: selectionBox.width, top: selectionBox.height },
+          ];
+    }
+  }
+
+  let editingBox: { width: number; height: number } | null = null;
+  if (editing && displayScale && measureContext) {
+    const bounds = textBounds(measureContext, {
+      x: editing.x,
+      y: editing.y,
+      text: editing.draft || " ",
+      size: editing.size,
+      font: editing.font,
+      bold: editing.bold,
+      italic: editing.italic,
+    });
+    editingBox = {
+      width: Math.max(bounds.width, editing.size * 2) * displayScale + 14,
+      height: bounds.height * displayScale + 8,
+    };
+  }
 
   return (
     <DialogShell onBackdrop={saving ? undefined : requestClose}>
@@ -525,10 +1334,24 @@ export function ScreenshotEditor({
               || event.target instanceof HTMLSelectElement;
             if (event.key === "Escape" && !saving) {
               event.preventDefault();
-              requestClose();
+              if (selectedId !== null) {
+                setSelectedId(null);
+              } else {
+                requestClose();
+              }
             } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+              if (!editingText) {
+                event.preventDefault();
+                undo();
+              }
+            } else if (
+              !editingText
+              && (event.key === "Delete" || event.key === "Backspace")
+              && selectedId !== null
+              && tool === "select"
+            ) {
               event.preventDefault();
-              undo();
+              deleteAnnotation(selectedId);
             } else if (!editingText && event.key === "ArrowLeft" && hasPrevious) {
               event.preventDefault();
               requestNavigation(-1);
@@ -638,11 +1461,12 @@ export function ScreenshotEditor({
                   aria-label={t(item.key)}
                   title={t(item.key)}
                   onClick={() => {
+                    if (editingRef.current) {
+                      commitTextDraft();
+                    }
                     setTool(item.id);
-                    if (item.id === "text") {
-                      setTextFormatOpen((open) => !open || tool !== "text");
-                    } else {
-                      setTextFormatOpen(false);
+                    if (item.id !== "select") {
+                      setSelectedId(null);
                     }
                   }}
                 >
@@ -680,62 +1504,59 @@ export function ScreenshotEditor({
                 <Maximize2 size={14} aria-hidden="true" />
               </button>
             </div>
-            {tool === "text" && textFormatOpen ? (
-              <div
-                aria-label={t("screenshots.editor.text")}
-                className="screenshots-editor__text-format"
-                role="dialog"
-              >
-                <TextInput
-                  autoFocus
-                  className="screenshots-editor__text"
-                  value={textValue}
-                  placeholder={t("screenshots.editor.textPlaceholder")}
-                  aria-label={t("screenshots.editor.textPlaceholder")}
-                  onChange={(event) => setTextValue(event.currentTarget.value)}
-                />
-                <label>
-                  <span>{t("workspace.fileViewer.font")}</span>
-                  <select
-                    value={textFont}
-                    onChange={(event) => setTextFont(event.currentTarget.value as TextFont)}
-                  >
-                    <option value="app">{t("screenshots.editor.appFont")}</option>
-                    <option value="sans-serif">{t("screenshots.editor.sansSerif")}</option>
-                    <option value="serif">{t("screenshots.editor.serif")}</option>
-                    <option value="monospace">{t("screenshots.editor.monospace")}</option>
-                  </select>
-                </label>
-                <label>
-                  <span>{t("workspace.fileViewer.fontSize")}</span>
-                  <input
-                    min={8}
-                    max={256}
-                    type="number"
-                    value={textSize}
-                    onChange={(event) => {
-                      const next = Number.parseInt(event.currentTarget.value, 10);
-                      if (Number.isFinite(next)) {
-                        setTextSize(Math.min(256, Math.max(8, next)));
-                      }
-                    }}
-                  />
-                </label>
-                <label className="screenshots-editor__text-color">
-                  <span>{t("common.customColor")}</span>
-                  <i style={{ background: textColor }} />
-                  <ColorPalettePicker value={textColor} onChange={setTextColor} />
-                </label>
+          </div>
+          <div className="screenshots-editor__optionsbar">
+            <div
+              className="screenshots-editor__swatches"
+              role="group"
+              aria-label={t("screenshots.editor.color")}
+            >
+              <span className="screenshots-editor__optionsbar-label">
+                {t("screenshots.editor.color")}
+              </span>
+              {swatches.map((swatch) => (
                 <button
+                  key={swatch.key}
                   type="button"
-                  className={`screenshots-editor__format-toggle${textBold ? " active" : ""}`}
-                  aria-pressed={textBold}
-                  onClick={() => setTextBold((bold) => !bold)}
+                  className={`screenshots-editor__swatch${
+                    color.toLowerCase() === swatch.value.toLowerCase() ? " active" : ""
+                  }`}
+                  style={{ background: swatch.value }}
+                  aria-label={t(swatch.key)}
+                  title={t(swatch.key)}
+                  aria-pressed={color.toLowerCase() === swatch.value.toLowerCase()}
+                  onClick={() => applyColor(swatch.value)}
+                />
+              ))}
+              <ColorPalettePicker
+                className="screenshots-editor__custom-color"
+                value={color}
+                onChange={applyColor}
+              />
+            </div>
+            <span className="screenshots-editor__divider" aria-hidden="true" />
+            <div
+              className="screenshots-editor__strokes"
+              role="group"
+              aria-label={t("screenshots.editor.strokeWidth")}
+            >
+              <span className="screenshots-editor__optionsbar-label">
+                {t("screenshots.editor.strokeWidth")}
+              </span>
+              {STROKE_OPTIONS.map((option) => (
+                <button
+                  key={option.width}
+                  type="button"
+                  className={`screenshots-editor__stroke${stroke === option.width ? " active" : ""}`}
+                  aria-label={t(option.key)}
+                  title={t(option.key)}
+                  aria-pressed={stroke === option.width}
+                  onClick={() => applyStroke(option.width)}
                 >
-                  {t("screenshots.editor.bold")}
+                  <i style={{ width: option.dot, height: option.dot, background: color }} />
                 </button>
-              </div>
-            ) : null}
+              ))}
+            </div>
           </div>
           <div
             ref={stageRef}
@@ -747,28 +1568,87 @@ export function ScreenshotEditor({
                 ? { width: scaledWidth + 36, height: scaledHeight + 36 }
                 : undefined}
             >
-              <canvas
-                ref={canvasRef}
-                className={`${zoom === "fit" ? "is-fit" : "is-scaled"}${tool === "pan" ? " is-pan" : ""}`}
-                style={scaledWidth && scaledHeight
-                  ? { width: scaledWidth, height: scaledHeight }
-                  : fitSize
-                    ? { width: fitSize.width, height: fitSize.height }
+              <div
+                className="screenshots-editor__canvas-frame"
+                style={displayWidth && displayHeight
+                  ? { width: displayWidth, height: displayHeight }
                   : undefined}
-                aria-label={screenshot.fileName}
-                onPointerDown={pointerDown}
-                onPointerMove={pointerMove}
-                onPointerUp={pointerUp}
-                onPointerCancel={() => {
-                  const drawing = drawingRef.current;
-                  const context = canvasRef.current?.getContext("2d");
-                  if (drawing && context) {
-                    context.putImageData(drawing.before, 0, 0);
-                  }
-                  drawingRef.current = null;
-                  panRef.current = null;
-                }}
-              />
+              >
+                <canvas
+                  ref={canvasRef}
+                  className={`${zoom === "fit" ? "is-fit" : "is-scaled"}${
+                    tool === "pan" ? " is-pan" : tool === "select" ? " is-select" : tool === "text" ? " is-text" : ""
+                  }`}
+                  aria-label={screenshot.fileName}
+                  onPointerDown={pointerDown}
+                  onPointerMove={pointerMove}
+                  onPointerUp={pointerUp}
+                  onPointerCancel={pointerCancel}
+                  onDoubleClick={canvasDoubleClick}
+                  onContextMenu={canvasContextMenu}
+                />
+                {selectionBox ? (
+                  <div
+                    className="screenshots-editor__selection"
+                    style={{
+                      left: selectionBox.left,
+                      top: selectionBox.top,
+                      width: selectionBox.width,
+                      height: selectionBox.height,
+                    }}
+                  >
+                    {selectionHandles.map((handle) => (
+                      <span
+                        key={handle.id}
+                        className={`screenshots-editor__handle is-${handle.id}`}
+                        style={{ left: handle.left, top: handle.top }}
+                        onPointerDown={(event) => beginHandleDrag(event, handle.id)}
+                        onPointerMove={handleDragMove}
+                        onPointerUp={endHandleDrag}
+                        onPointerCancel={endHandleDrag}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {editing && displayScale && editingBox ? (
+                  <textarea
+                    className="screenshots-editor__text-input"
+                    style={{
+                      left: editing.x * displayScale - 2,
+                      top: editing.y * displayScale - 2,
+                      width: editingBox.width,
+                      height: editingBox.height,
+                      fontSize: editing.size * displayScale,
+                      lineHeight: TEXT_LINE_HEIGHT,
+                      fontFamily: resolvedTextFont(editing.font),
+                      fontWeight: editing.bold ? 700 : 400,
+                      fontStyle: editing.italic ? "italic" : "normal",
+                      color: editing.color,
+                      caretColor: editing.color,
+                    }}
+                    value={editing.draft}
+                    aria-label={t("screenshots.editor.textPlaceholder")}
+                    autoFocus
+                    spellCheck={false}
+                    onChange={(event) => {
+                      const draft = editingRef.current;
+                      if (draft) {
+                        applyEditing({ ...draft, draft: event.currentTarget.value });
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        applyEditing(null);
+                      }
+                    }}
+                    onBlur={commitTextDraft}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onContextMenu={editingContextMenu}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
