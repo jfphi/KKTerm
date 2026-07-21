@@ -492,6 +492,28 @@
   max-height: calc(100vh - 40px) !important;
 }
 
+.screenshots-editor .kk-dlg-head {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 44px 0 14px;
+}
+
+.screenshots-editor .kk-dlg-title {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screenshots-editor .kk-dlg-close {
+  top: 6px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+}
+
 .screenshots-editor .kk-dlg-body {
   padding: 0;
   overflow: hidden;
@@ -511,7 +533,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 5px;
-  padding: 8px 12px;
+  padding: 5px 10px;
   overflow: visible;
   border-bottom: 1px solid var(--hairline);
   background: var(--surface-muted);
@@ -521,8 +543,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -615,7 +637,8 @@
 
 .screenshots-editor .kk-dlg-foot {
   position: relative;
-  min-height: 55px;
+  min-height: 38px;
+  padding: 8px 14px;
 }
 
 .screenshots-editor__divider {
