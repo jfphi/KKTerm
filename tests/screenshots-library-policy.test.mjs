@@ -87,7 +87,9 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
   assert.match(editor, /fitImageDimensions/);
   assert.match(editor, /screenshots-editor__stage\$\{zoom === "fit" \? " is-fit" : ""\}/);
   assert.match(styles, /screenshots-editor__stage\.is-fit \{[\s\S]*?overflow: hidden/);
-  assert.match(editor, /<Save size=\{15\}/);
+  assert.match(editor, /<Floppy size=\{15\}/);
+  assert.match(editor, /MultipleFloppy/);
+  assert.match(page, /write_screenshot_data_url_to_clipboard/);
   assert.match(editor, /screenshots\.editor\.saveAs/);
   assert.match(editor, /save\("overwrite"/);
   assert.match(editor, /save\("copy"/);
