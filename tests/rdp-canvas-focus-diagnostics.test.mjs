@@ -9,7 +9,7 @@ const source = await readFile(
 
 test("IronRDP canvas records focus and first key diagnostics", () => {
   assert.match(source, /function RdpCanvasView/);
-  assert.match(source, /const focusInput = \(reason: string\) => \{/);
+  assert.match(source, /const focusInput = useCallback\(\(reason: string\) => \{/);
   assert.match(source, /input\.focus\(\{ preventScroll: true \}\)/);
   assert.match(source, /logUiDebug\("rdp\.canvas\.focus"/);
   assert.match(source, /inputFocused: document\.activeElement === input/);
