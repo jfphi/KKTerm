@@ -10,7 +10,7 @@
 //     as scancodes via `send_rdp_client_key_event`.
 
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { writeToClipboard } from "../../../../lib/clipboard";
@@ -97,7 +97,7 @@ export function RdpCanvasView({
   const [errorMessage, setErrorMessage] = useState("");
   const sharedLocalFoldersKey = rdpOptions.sharedLocalFolders.join("\u0000");
 
-  const focusInput = (reason: string) => {
+  const focusInput = useCallback((reason: string) => {
     const input = inputRef.current;
     if (!input) {
       return;
@@ -110,7 +110,7 @@ export function RdpCanvasView({
       activeElement: document.activeElement?.tagName.toLowerCase() ?? null,
       inputFocused: document.activeElement === input,
     });
-  };
+  }, []);
 
   // Session lifecycle + framebuffer rendering.
   useEffect(() => {
@@ -359,21 +359,21 @@ export function RdpCanvasView({
     }
   };
 
-  const sendCtrlAltDelete = () => {
+  const sendCtrlAltDelete = useCallback(() => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) {
       return;
     }
     void invokeCommand("send_rdp_client_ctrl_alt_delete", { request: { sessionId } }).catch(() => undefined);
     focusInput("ctrl-alt-delete");
-  };
+  }, [focusInput]);
 
   useEffect(() => {
     if (cadSignal === 0) {
       return;
     }
     sendCtrlAltDelete();
-  }, [cadSignal]);
+  }, [cadSignal, sendCtrlAltDelete]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     logUiDebug("rdp.canvas.key", {

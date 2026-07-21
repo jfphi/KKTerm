@@ -9,7 +9,7 @@ use serde_json::json;
 use super::detect::{
     detect_chocolatey_package, detect_npm_provider, detect_one, github_release_marker_path,
 };
-use super::proc::no_window;
+use super::proc::{decode_console_output, no_window};
 use super::schema::{Catalog, Provider, Recipe};
 
 pub type LatestVersionResult = Result<Option<String>, String>;
@@ -172,7 +172,7 @@ fn winget_source_latest(id: &str) -> LatestVersionResult {
             command_error_text(&output.stderr, &output.stdout)
         ));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = decode_console_output(&output.stdout);
     if let Some(version) = winget_show_version_from_output(&stdout) {
         return Ok(Some(version));
     }
@@ -496,11 +496,11 @@ fn normalize_github_release_tag(tag: &str) -> String {
 }
 
 fn command_error_text(stderr: &[u8], stdout: &[u8]) -> String {
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let stderr = decode_console_output(stderr).trim().to_string();
     if !stderr.is_empty() {
         return stderr;
     }
-    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+    let stdout = decode_console_output(stdout).trim().to_string();
     if !stdout.is_empty() {
         return stdout;
     }

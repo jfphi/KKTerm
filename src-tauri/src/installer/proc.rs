@@ -25,6 +25,48 @@ pub fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Decode output from Windows console programs without corrupting localized
+/// text. Most modern tools emit UTF-8, while older/native console paths use the
+/// machine OEM code page (950 on zh-TW Windows).
+pub fn decode_console_output(bytes: &[u8]) -> String {
+    #[cfg(windows)]
+    {
+        let code_page = unsafe { windows_sys::Win32::Globalization::GetOEMCP() };
+        return decode_console_output_with_code_page(bytes, code_page);
+    }
+
+    #[cfg(not(windows))]
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[cfg(any(windows, test))]
+fn decode_console_output_with_code_page(bytes: &[u8], code_page: u32) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
+    }
+
+    let encoding = match code_page {
+        932 => Some(encoding_rs::SHIFT_JIS),
+        936 => Some(encoding_rs::GBK),
+        949 => Some(encoding_rs::EUC_KR),
+        950 => Some(encoding_rs::BIG5),
+        1250 => Some(encoding_rs::WINDOWS_1250),
+        1251 => Some(encoding_rs::WINDOWS_1251),
+        1252 => Some(encoding_rs::WINDOWS_1252),
+        1253 => Some(encoding_rs::WINDOWS_1253),
+        1254 => Some(encoding_rs::WINDOWS_1254),
+        1255 => Some(encoding_rs::WINDOWS_1255),
+        1256 => Some(encoding_rs::WINDOWS_1256),
+        1257 => Some(encoding_rs::WINDOWS_1257),
+        1258 => Some(encoding_rs::WINDOWS_1258),
+        _ => None,
+    };
+    match encoding {
+        Some(encoding) => encoding.decode(bytes).0.into_owned(),
+        None => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 pub fn npm_program() -> &'static str {
     if cfg!(target_os = "windows") {
         "npm.cmd"
@@ -44,5 +86,20 @@ mod tests {
 
         #[cfg(not(target_os = "windows"))]
         assert_eq!(npm_program(), "npm");
+    }
+
+    #[test]
+    fn console_output_decodes_zh_tw_oem_bytes() {
+        let (bytes, _, had_errors) = encoding_rs::BIG5.encode("已安裝");
+        assert!(!had_errors);
+
+        assert_eq!(
+            decode_console_output_with_code_page(&bytes, 950),
+            "已安裝"
+        );
+        assert_eq!(
+            decode_console_output_with_code_page("已安裝".as_bytes(), 950),
+            "已安裝"
+        );
     }
 }

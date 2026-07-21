@@ -39,7 +39,7 @@ use super::managed_app::{
     managed_app_marker_path,
 };
 use super::options::InstallOptions;
-use super::proc::{no_window, npm_program};
+use super::proc::{decode_console_output, no_window, npm_program};
 use super::schema::{GithubReleaseLayout, PlanStep, Provider, Recipe, RecipeOption};
 
 pub type EventSink = Box<dyn Fn(ProgressEvent) + Send + Sync>;
@@ -2145,7 +2145,7 @@ fn elevated_powershell_script(batch_path: &Path) -> String {
 /// partial line until `finished` so a line being written isn't emitted twice.
 fn drain_elevated_log(path: &Path, emitted: &mut usize, finished: bool) -> Vec<String> {
     let bytes = std::fs::read(path).unwrap_or_default();
-    let content = String::from_utf8_lossy(&bytes);
+    let content = decode_console_output(&bytes);
     let all: Vec<&str> = content.lines().collect();
     let mut end = all.len();
     if !finished && end > 0 && !content.ends_with('\n') {
@@ -2925,7 +2925,7 @@ fn send_stream_chunk(
     if buf.is_empty() {
         return true;
     }
-    let line = String::from_utf8_lossy(buf).trim().to_string();
+    let line = decode_console_output(buf).trim().to_string();
     buf.clear();
     if line.is_empty() {
         return true;
