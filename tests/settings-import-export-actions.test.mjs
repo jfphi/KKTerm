@@ -15,3 +15,32 @@ test("Settings data actions expose only selective Import and Export buttons", as
   assert.doesNotMatch(actionsBlock, /settings\.selectiveExport/);
   assert.doesNotMatch(actionsBlock, /settings\.selectiveImport/);
 });
+
+test("Selective data dialogs preserve backend segments behind five UI groups", async () => {
+  const exportDialog = await readFile(
+    new URL("../src/modules/settings/SelectiveExportDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const importDialog = await readFile(
+    new URL("../src/modules/settings/SelectiveImportDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const portableDialog = await readFile(
+    new URL("../src/modules/settings/PortableCreatorDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    exportDialog,
+    /id: "workspacesConnections"[^\n]+segments: \["workspaces", "connections"\]/,
+  );
+  assert.match(exportDialog, /id: "dashboards"[^\n]+segments: \["dashboards"\]/);
+  assert.match(exportDialog, /id: "itops"[^\n]+segments: \["itops"\]/);
+  assert.match(exportDialog, /id: "assistant"[^\n]+segments: \["assistant"\]/);
+  assert.match(exportDialog, /id: "settings"[^\n]+segments: \["settings", "mcpServers"\]/);
+  assert.match(exportDialog, /\.flatMap\(\(group\) => group\.segments\)/);
+  assert.match(importDialog, /EXPORT_GROUPS\.filter/);
+  assert.match(importDialog, /group\.segments\.some/);
+  assert.match(importDialog, /updateGroupAction\(group\.segments/);
+  assert.match(portableDialog, /\.flatMap\(\(group\) => group\.segments\)/);
+});

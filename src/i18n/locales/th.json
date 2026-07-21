@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "ไซต์ ห้องเซิร์ฟเวอร์ แร็ค โฮสต์ งาน การทำงานอัตโนมัติ และประวัติการทำงาน",
     "segment_assistant": "ผู้ช่วย AI",
     "segmentDesc_assistant": "ประวัติการแชทและความทรงจำของผู้ช่วย AI",
+    "segment_workspacesConnections": "พื้นที่ทำงานและการเชื่อมต่อ",
+    "segmentDesc_workspacesConnections": "รายการพื้นที่ทำงานพร้อมการเชื่อมต่อ โฟลเดอร์ และแท็กภายใน รหัสผ่านจะรวมเฉพาะเมื่อเลือกด้านล่าง",
     "segment_credentials": "รหัสผ่าน",
     "aiProvider": "ผู้ให้บริการ AI",
     "provider": "ผู้ให้บริการ",

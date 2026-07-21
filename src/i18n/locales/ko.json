@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "사이트, 서버실, 랙, 호스트, 작업, 자동화, 실행 기록.",
     "segment_assistant": "AI 어시스턴트",
     "segmentDesc_assistant": "AI 어시스턴트 채팅 기록과 메모리.",
+    "segment_workspacesConnections": "작업 영역 및 연결",
+    "segmentDesc_workspacesConnections": "작업 영역 목록과 그 안의 연결, 폴더, 태그. 비밀번호는 아래에서 포함할 때만 포함됩니다.",
     "segment_credentials": "비밀번호",
     "aiProvider": "AI 제공자",
     "provider": "제공자",

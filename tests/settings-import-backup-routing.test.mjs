@@ -23,11 +23,15 @@ test("Selective replace import closes live workspace tabs before replacing works
 
   assert.match(
     dialog,
-    /actions\.workspaces === "replace" \|\| actions\.connections === "replace"/,
+    /manifest\.segments\.includes\(segment\) && actions\[segment\] === "replace"/,
   );
   assert.match(
     dialog,
-    /if \(replacesWorkspaceData \|\| actions\.settings === "replace"\) \{\s*closeAllTabs\(\);\s*\}/s,
+    /replacesPresentSegment\("workspaces"\) \|\| replacesPresentSegment\("connections"\)/,
+  );
+  assert.match(
+    dialog,
+    /if \(replacesWorkspaceData \|\| replacesPresentSegment\("settings"\)\) \{\s*closeAllTabs\(\);\s*\}/s,
   );
   assert.match(dialog, /importedConnections \|\| result\.applied\.includes\("workspaces"\)/);
 });

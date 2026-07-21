@@ -2151,6 +2151,8 @@
     "segmentDesc_itops": "Sites, salles de serveurs, racks, hôtes, tâches, automatisations et historique d'exécutions.",
     "segment_assistant": "Assistant IA",
     "segmentDesc_assistant": "Historique de discussion et mémoires de l'Assistant IA.",
+    "segment_workspacesConnections": "Espaces de travail et connexions",
+    "segmentDesc_workspacesConnections": "Liste des espaces de travail avec leurs connexions, dossiers et étiquettes. Les mots de passe ne voyagent que s'ils sont inclus ci-dessous.",
     "segment_credentials": "Mots de passe",
     "aiProvider": "Fournisseur IA",
     "provider": "Fournisseur",
