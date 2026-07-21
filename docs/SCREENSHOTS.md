@@ -250,7 +250,7 @@ land in the Library with a Status Bar notice; 500-image folder lists smoothly;
 The library now supports persisted sort/group controls (defaulting to Date
 descending and Date grouping), multi-selection, non-destructive batch resize
 and PNG/JPEG conversion, capture delay presets, and a unified viewer/editor
-with Fit/zoom plus arrows, rectangles, ellipses, text, and mosaic regions. Crop, highlight,
+with Fit/zoom plus freehand pencil strokes, arrows, rectangles, ellipses, text, and mosaic regions. Crop, highlight,
 after-capture editor automation, per-monitor fullscreen capture, and filename
 patterns remain later work.
 

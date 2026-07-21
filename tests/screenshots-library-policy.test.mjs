@@ -56,10 +56,13 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
     read("src-tauri/src/screenshot.rs"),
   ]);
 
-  for (const tool of ["pan", "select", "arrow", "rectangle", "ellipse", "text", "mosaic"]) {
+  for (const tool of ["pan", "select", "pencil", "arrow", "rectangle", "ellipse", "text", "mosaic"]) {
     assert.match(editor, new RegExp(`id: "${tool}"`));
   }
-  assert.match(editor, /id: "pan", icon: Hand[\s\S]*?id: "select", icon: MousePointer2[\s\S]*?id: "arrow"/);
+  assert.match(editor, /id: "pan", icon: Hand[\s\S]*?id: "select", icon: MousePointer2[\s\S]*?id: "pencil", icon: Pencil[\s\S]*?id: "arrow"/);
+  assert.match(editor, /type FreehandAnnotation = [\s\S]*?kind: "pencil"[\s\S]*?points: Point\[\]/);
+  assert.match(editor, /function drawFreehand\(/);
+  assert.match(editor, /tool === "pencil"[\s\S]*?freehandRef\.current/);
   assert.match(editor, /stage\.scrollLeft = pan\.scrollLeft/);
   assert.match(editor, /stage\.scrollTop = pan\.scrollTop/);
   assert.match(editor, /<Sheet/);
@@ -75,9 +78,17 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
   assert.match(editor, /window\.innerWidth \* 0\.8/);
   assert.match(editor, /screenshots-editor__resizer/);
   assert.match(editor, /<ColorPalettePicker/);
+  assert.doesNotMatch(editor, /className="screenshots-editor__optionsbar"/);
+  assert.match(editor, /EDITOR_TOOLS\.map[\s\S]*?screenshots-editor__divider[\s\S]*?screenshots-editor__swatches/);
+  assert.match(editor, /if \(tool === "text"\) \{\s*event\.preventDefault\(\);[\s\S]*?startTextDraft\(point\)/);
   assert.doesNotMatch(editor, /zoom === "fit" \? t\("workspace\.fileViewer\.fit"\)/);
   assert.match(editor, /screenshots\.editor\.unsavedTitle/);
   assert.match(editor, /zClassName="kk-qc-subdialog"/);
+  assert.match(editor, /<DialogShell>/);
+  assert.doesNotMatch(editor, /<DialogShell\s+onBackdrop=/);
+  assert.match(editor, /onKeyDown=\{\(event\) => \{\s*event\.stopPropagation\(\);\s*if \(event\.key === "Escape"\)/);
+  assert.match(editor, /if \(event\.key === "Escape" && !saving\) \{\s*event\.preventDefault\(\);\s*requestClose\(\);/);
+  assert.doesNotMatch(editor, /if \(selectedId !== null\) \{\s*setSelectedId\(null\);/);
   assert.match(editor, /onClose=\{requestClose\}/);
   assert.match(editor, /type PendingEditorAction = "close" \| -1 \| 1/);
   assert.match(editor, /function requestNavigation\(direction: -1 \| 1\)/);
@@ -87,6 +98,7 @@ test("unified screenshot dialog follows the Sheet contract and bounds image zoom
   assert.match(page, /setViewerId\(navigationTarget\?\.id \?\? saved\.id\)/);
   assert.match(styles, /screenshots-editor__canvas-wrap \{[\s\S]*?box-sizing: border-box/);
   assert.match(styles, /screenshots-editor__footer-meta[\s\S]*left: 50%/);
+  assert.match(styles, /screenshots-editor \.kk-dlg-title \{[\s\S]*?text-align: center/);
   assert.match(editor, /fitImageDimensions/);
   assert.match(editor, /screenshots-editor__stage\$\{zoom === "fit" \? " is-fit" : ""\}/);
   assert.match(styles, /screenshots-editor__stage\.is-fit \{[\s\S]*?overflow: hidden/);

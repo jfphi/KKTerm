@@ -496,13 +496,15 @@
   display: flex;
   min-height: 36px;
   align-items: center;
-  padding: 0 44px 0 14px;
+  padding: 0 44px;
 }
 
 .screenshots-editor .kk-dlg-title {
+  width: 100%;
   overflow: hidden;
   font-size: 14px;
   line-height: 1.2;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -657,19 +659,10 @@
   padding: 0;
 }
 
-.screenshots-editor__optionsbar {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--hairline);
-  background: var(--surface-muted);
-}
-
 .screenshots-editor__swatches,
 .screenshots-editor__strokes {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
 }
@@ -681,7 +674,7 @@
   white-space: nowrap;
 }
 
-.screenshots-editor__swatch {
+.screenshots-editor__toolbar .screenshots-editor__swatch {
   width: 18px;
   height: 18px;
   padding: 0;
@@ -690,17 +683,21 @@
   cursor: pointer;
 }
 
-.screenshots-editor__swatch:hover {
+.screenshots-editor__toolbar .screenshots-editor__swatch:hover {
   transform: scale(1.1);
 }
 
-.screenshots-editor__swatch.active {
+.screenshots-editor__toolbar .screenshots-editor__swatch.active {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
 }
 
-.screenshots-editor__custom-color .color-palette-rainbow {
+.screenshots-editor__toolbar .screenshots-editor__custom-color .color-palette-rainbow {
   width: 18px;
   height: 18px;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: conic-gradient(#ff375f, #ff9f0a, #ffd60a, #34c759, #30b0c7, #0a84ff, #5e5ce6, #bf5af2, #ff375f);
 }
 
 .screenshots-editor__custom-color .color-palette-popover {
@@ -708,7 +705,7 @@
   left: 0;
 }
 
-.screenshots-editor__stroke {
+.screenshots-editor__toolbar .screenshots-editor__stroke {
   display: inline-grid;
   width: 22px;
   height: 22px;
@@ -720,12 +717,12 @@
   cursor: pointer;
 }
 
-.screenshots-editor__stroke:hover {
+.screenshots-editor__toolbar .screenshots-editor__stroke:hover {
   border-color: var(--border);
   background: var(--surface);
 }
 
-.screenshots-editor__stroke.active {
+.screenshots-editor__toolbar .screenshots-editor__stroke.active {
   border-color: var(--border);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--accent-soft);

@@ -20,6 +20,7 @@ import {
   Hand,
   Maximize2,
   MousePointer2,
+  Pencil,
   RotateCcw,
   Square,
   Trash2,
@@ -44,7 +45,7 @@ import { invokeCommand, type FullScreenshot, type StoredScreenshot } from "../..
 import { formatScreenshotBytes } from "./LibraryView";
 import { fitImageDimensions } from "./editorSizing";
 
-type EditorTool = "pan" | "select" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic";
+type EditorTool = "pan" | "select" | "pencil" | "arrow" | "rectangle" | "ellipse" | "text" | "mosaic";
 type ShapeKind = "arrow" | "rectangle" | "ellipse";
 type Point = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -62,6 +63,13 @@ type ShapeAnnotation = {
   stroke: number;
 };
 type MosaicAnnotation = { id: number; kind: "mosaic"; start: Point; end: Point };
+type FreehandAnnotation = {
+  id: number;
+  kind: "pencil";
+  points: Point[];
+  color: string;
+  stroke: number;
+};
 type TextAnnotation = {
   id: number;
   kind: "text";
@@ -74,7 +82,7 @@ type TextAnnotation = {
   bold: boolean;
   italic: boolean;
 };
-type Annotation = ShapeAnnotation | MosaicAnnotation | TextAnnotation;
+type Annotation = ShapeAnnotation | MosaicAnnotation | FreehandAnnotation | TextAnnotation;
 type TextDraft = {
   id: number | null;
   x: number;
@@ -99,6 +107,7 @@ const EDITOR_TOOLS: Array<{
 }> = [
   { id: "pan", icon: Hand, key: "screenshots.editor.pan" },
   { id: "select", icon: MousePointer2, key: "screenshots.editor.select" },
+  { id: "pencil", icon: Pencil, key: "screenshots.editor.pencil" },
   { id: "arrow", icon: ArrowRight, key: "screenshots.editor.arrow" },
   { id: "rectangle", icon: Square, key: "screenshots.editor.rectangle" },
   { id: "ellipse", icon: Circle, key: "screenshots.editor.ellipse" },
@@ -224,9 +233,28 @@ function textBounds(context: CanvasRenderingContext2D, annotation: {
   };
 }
 
+function freehandBounds(context: CanvasRenderingContext2D, annotation: FreehandAnnotation): Rect {
+  const xs = annotation.points.map((point) => point.x);
+  const ys = annotation.points.map((point) => point.y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return expandRect(
+    {
+      x: left,
+      y: top,
+      width: Math.max(...xs) - left,
+      height: Math.max(...ys) - top,
+    },
+    lineWidthFor(context.canvas.width, annotation.stroke) / 2,
+  );
+}
+
 function annotationBounds(context: CanvasRenderingContext2D, annotation: Annotation): Rect {
   if (annotation.kind === "text") {
     return textBounds(context, annotation);
+  }
+  if (annotation.kind === "pencil") {
+    return freehandBounds(context, annotation);
   }
   const rect = normalizedRect(annotation.start, annotation.end);
   if (annotation.kind === "mosaic") {
@@ -250,6 +278,17 @@ function hitTest(
       }
       continue;
     }
+    if (annotation.kind === "pencil") {
+      const reach = tolerance + lineWidthFor(context.canvas.width, annotation.stroke) / 2;
+      const hit = annotation.points.some((current, pointIndex) => {
+        const next = annotation.points[pointIndex + 1] ?? current;
+        return distanceToSegment(point, current, next) <= reach;
+      });
+      if (hit) {
+        return annotation;
+      }
+      continue;
+    }
     if (pointInRect(point, annotationBounds(context, annotation), tolerance)) {
       return annotation;
     }
@@ -260,6 +299,12 @@ function hitTest(
 function translateAnnotation(annotation: Annotation, dx: number, dy: number): Annotation {
   if (annotation.kind === "text") {
     return { ...annotation, x: annotation.x + dx, y: annotation.y + dy };
+  }
+  if (annotation.kind === "pencil") {
+    return {
+      ...annotation,
+      points: annotation.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+    };
   }
   return {
     ...annotation,
@@ -281,6 +326,9 @@ function resizeAnnotation(
   handle: SelectionHandle,
   point: Point,
 ): Annotation {
+  if (original.kind === "pencil") {
+    return original;
+  }
   if (original.kind !== "text") {
     if (handle === "start" || handle === "end") {
       return { ...original, [handle]: point };
@@ -384,6 +432,37 @@ function drawText(context: CanvasRenderingContext2D, annotation: TextAnnotation)
   context.restore();
 }
 
+function drawFreehand(
+  context: CanvasRenderingContext2D,
+  points: Point[],
+  color: string,
+  lineWidth: number,
+) {
+  const first = points[0];
+  if (!first) {
+    return;
+  }
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = lineWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  if (points.length === 1) {
+    context.beginPath();
+    context.arc(first.x, first.y, lineWidth / 2, 0, Math.PI * 2);
+    context.fill();
+  } else {
+    context.beginPath();
+    context.moveTo(first.x, first.y);
+    for (const point of points.slice(1)) {
+      context.lineTo(point.x, point.y);
+    }
+    context.stroke();
+  }
+  context.restore();
+}
+
 function mosaicRegion(context: CanvasRenderingContext2D, start: Point, end: Point) {
   const x = Math.max(0, Math.floor(Math.min(start.x, end.x)));
   const y = Math.max(0, Math.floor(Math.min(start.y, end.y)));
@@ -414,6 +493,13 @@ function mosaicRegion(context: CanvasRenderingContext2D, start: Point, end: Poin
 function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotation) {
   if (annotation.kind === "text") {
     drawText(context, annotation);
+  } else if (annotation.kind === "pencil") {
+    drawFreehand(
+      context,
+      annotation.points,
+      annotation.color,
+      lineWidthFor(context.canvas.width, annotation.stroke),
+    );
   } else if (annotation.kind === "mosaic") {
     mosaicRegion(context, annotation.start, annotation.end);
   } else {
@@ -462,6 +548,7 @@ export function ScreenshotEditor({
   const editingRef = useRef<TextDraft | null>(null);
   const idRef = useRef(1);
   const drawingRef = useRef<{ start: Point } | null>(null);
+  const freehandRef = useRef<{ pointerId: number; points: Point[] } | null>(null);
   const moveDragRef = useRef<{
     pointerId: number;
     id: number;
@@ -549,6 +636,7 @@ export function ScreenshotEditor({
     editingRef.current = null;
     setEditing(null);
     drawingRef.current = null;
+    freehandRef.current = null;
     moveDragRef.current = null;
     handleDragRef.current = null;
     panRef.current = null;
@@ -926,6 +1014,7 @@ export function ScreenshotEditor({
     }
     const point = canvasPoint(canvas, event.clientX, event.clientY);
     if (tool === "text") {
+      event.preventDefault();
       if (editingRef.current) {
         commitTextDraft();
         return;
@@ -951,6 +1040,14 @@ export function ScreenshotEditor({
           moved: false,
         };
       }
+      return;
+    }
+    if (tool === "pencil") {
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      freehandRef.current = { pointerId: event.pointerId, points: [point] };
+      renderCanvas();
+      drawFreehand(context, [point], color, lineWidthFor(canvas.width, stroke));
       return;
     }
     canvas.setPointerCapture(event.pointerId);
@@ -984,6 +1081,23 @@ export function ScreenshotEditor({
         applyAnnotations(moveDrag.before.map((annotation) => (
           annotation.id === moveDrag.id ? translateAnnotation(annotation, dx, dy) : annotation
         )));
+      }
+      return;
+    }
+    if (tool === "pencil") {
+      const freehand = freehandRef.current;
+      if (freehand && freehand.pointerId === event.pointerId) {
+        const point = canvasPoint(canvas, event.clientX, event.clientY);
+        const previous = freehand.points[freehand.points.length - 1];
+        if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) >= 0.75) {
+          freehand.points.push(point);
+          drawFreehand(
+            context,
+            previous ? [previous, point] : [point],
+            color,
+            lineWidthFor(canvas.width, stroke),
+          );
+        }
       }
       return;
     }
@@ -1026,12 +1140,42 @@ export function ScreenshotEditor({
       }
       return;
     }
+    if (tool === "pencil") {
+      const freehand = freehandRef.current;
+      const canvas = event.currentTarget;
+      if (!freehand || freehand.pointerId !== event.pointerId) {
+        return;
+      }
+      const point = canvasPoint(canvas, event.clientX, event.clientY);
+      const previous = freehand.points[freehand.points.length - 1];
+      if (!previous || point.x !== previous.x || point.y !== previous.y) {
+        freehand.points.push(point);
+      }
+      freehandRef.current = null;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+      const before = annotationsRef.current;
+      pushUndo(before);
+      applyAnnotations([
+        ...before,
+        {
+          id: idRef.current++,
+          kind: "pencil",
+          points: freehand.points,
+          color,
+          stroke,
+        },
+      ]);
+      return;
+    }
     const drawing = drawingRef.current;
     const canvas = event.currentTarget;
     if (!drawing || tool === "text") {
       return;
     }
     drawingRef.current = null;
+    freehandRef.current = null;
     canvas.releasePointerCapture(event.pointerId);
     const end = canvasPoint(canvas, event.clientX, event.clientY);
     const rect = normalizedRect(drawing.start, end);
@@ -1060,6 +1204,7 @@ export function ScreenshotEditor({
       applyAnnotations(moveDrag.before);
     }
     drawingRef.current = null;
+    freehandRef.current = null;
     moveDragRef.current = null;
     panRef.current = null;
     renderCanvas();
@@ -1266,7 +1411,9 @@ export function ScreenshotEditor({
         width: bounds.width * displayScale,
         height: bounds.height * displayScale,
       };
-      selectionHandles = selected.kind === "arrow"
+      selectionHandles = selected.kind === "pencil"
+        ? []
+        : selected.kind === "arrow"
         ? [
             {
               id: "start",
@@ -1306,7 +1453,7 @@ export function ScreenshotEditor({
   }
 
   return (
-    <DialogShell onBackdrop={saving ? undefined : requestClose}>
+    <DialogShell>
       <Sheet
         width={editorSize.width}
         height={editorSize.height}
@@ -1334,11 +1481,7 @@ export function ScreenshotEditor({
               || event.target instanceof HTMLSelectElement;
             if (event.key === "Escape" && !saving) {
               event.preventDefault();
-              if (selectedId !== null) {
-                setSelectedId(null);
-              } else {
-                requestClose();
-              }
+              requestClose();
             } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
               if (!editingText) {
                 event.preventDefault();
@@ -1474,38 +1617,7 @@ export function ScreenshotEditor({
                 </button>
               );
             })}
-            <span className="screenshots-editor__toolbar-spacer" />
-            <div className="screenshots-editor__zoom" aria-label={t("workspace.fileViewer.zoomIn")}>
-              <button
-                type="button"
-                title={t("workspace.fileViewer.zoomOut")}
-                aria-label={t("workspace.fileViewer.zoomOut")}
-                disabled={zoom === ZOOM_STEPS[0]}
-                onClick={() => stepZoom(-1)}
-              >
-                <ZoomOut size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                title={t("workspace.fileViewer.zoomIn")}
-                aria-label={t("workspace.fileViewer.zoomIn")}
-                disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-                onClick={() => stepZoom(1)}
-              >
-                <ZoomIn size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className={zoom === "fit" ? "active" : ""}
-                title={t("workspace.fileViewer.fit")}
-                aria-label={t("workspace.fileViewer.fit")}
-                onClick={() => setZoom("fit")}
-              >
-                <Maximize2 size={14} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-          <div className="screenshots-editor__optionsbar">
+            <span className="screenshots-editor__divider" aria-hidden="true" />
             <div
               className="screenshots-editor__swatches"
               role="group"
@@ -1556,6 +1668,36 @@ export function ScreenshotEditor({
                   <i style={{ width: option.dot, height: option.dot, background: color }} />
                 </button>
               ))}
+            </div>
+            <span className="screenshots-editor__toolbar-spacer" />
+            <div className="screenshots-editor__zoom" aria-label={t("workspace.fileViewer.zoomIn")}>
+              <button
+                type="button"
+                title={t("workspace.fileViewer.zoomOut")}
+                aria-label={t("workspace.fileViewer.zoomOut")}
+                disabled={zoom === ZOOM_STEPS[0]}
+                onClick={() => stepZoom(-1)}
+              >
+                <ZoomOut size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                title={t("workspace.fileViewer.zoomIn")}
+                aria-label={t("workspace.fileViewer.zoomIn")}
+                disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+                onClick={() => stepZoom(1)}
+              >
+                <ZoomIn size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={zoom === "fit" ? "active" : ""}
+                title={t("workspace.fileViewer.fit")}
+                aria-label={t("workspace.fileViewer.fit")}
+                onClick={() => setZoom("fit")}
+              >
+                <Maximize2 size={14} aria-hidden="true" />
+              </button>
             </div>
           </div>
           <div
