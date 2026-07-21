@@ -2102,15 +2102,15 @@ type CommandMap = {
     result: ScreenshotCaptureResult;
   };
   capture_fullscreen_screenshot_to_library: {
-    args: { kind: StoredScreenshot["kind"] };
+    args: { kind: StoredScreenshot["kind"]; minimizeWindow: boolean };
     result: ScreenshotCaptureResult;
   };
   capture_active_window_screenshot_to_library: {
-    args: { kind: StoredScreenshot["kind"] };
+    args: { kind: StoredScreenshot["kind"]; minimizeWindow: boolean };
     result: ScreenshotCaptureResult;
   };
   capture_interactive_region_screenshot_to_library: {
-    args: { kind: StoredScreenshot["kind"] };
+    args: { kind: StoredScreenshot["kind"]; minimizeWindow: boolean };
     result: ScreenshotCaptureResult;
   };
   list_screenshots: {

@@ -300,8 +300,9 @@ pub fn capture_fullscreen_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     let target = platform::virtual_screen_rect();
     let mut dib = platform::capture_screen_rect_to_dib(
         target.x,
@@ -329,8 +330,9 @@ pub fn capture_active_window_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     let screen = platform::virtual_screen_rect();
     let mut screen_dib = platform::capture_screen_rect_to_dib(
         screen.x,
@@ -362,8 +364,9 @@ pub fn capture_interactive_region_to_library(
     kind: String,
     options: LibrarySaveOptions,
     use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     let screen = platform::virtual_screen_rect();
     let mut screen_dib = platform::capture_screen_rect_to_dib(
         screen.x,
@@ -401,10 +404,11 @@ struct MinimizedCaptureWindow {
     window: tauri::WebviewWindow,
     was_minimized: bool,
     was_visible: bool,
+    did_minimize: bool,
 }
 
 impl MinimizedCaptureWindow {
-    fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+    fn new(app: &tauri::AppHandle, minimize_window: bool) -> Result<Self, String> {
         let window = app
             .get_webview_window("main")
             .ok_or_else(|| "main window is not available".to_string())?;
@@ -412,7 +416,7 @@ impl MinimizedCaptureWindow {
         let was_visible = window.is_visible().unwrap_or(true);
         // A window already hidden to the tray must stay hidden: skip the
         // minimize/settle dance entirely so the capture never restores it.
-        if was_visible {
+        if was_visible && minimize_window {
             window
                 .minimize()
                 .map_err(|error| format!("failed to minimize window before screenshot: {error}"))?;
@@ -422,13 +426,14 @@ impl MinimizedCaptureWindow {
             window,
             was_minimized,
             was_visible,
+            did_minimize: was_visible && minimize_window,
         })
     }
 }
 
 impl Drop for MinimizedCaptureWindow {
     fn drop(&mut self) {
-        if !self.was_visible {
+        if !self.was_visible || !self.did_minimize {
             return;
         }
         let _ = self.window.show();
@@ -588,8 +593,9 @@ pub fn capture_fullscreen_to_library(
     kind: String,
     options: LibrarySaveOptions,
     _use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     let region = capture_engine::capture_virtual_screen()?;
     deliver_rgba(&region.rgba, region.width, region.height, kind, &options)
 }
@@ -600,8 +606,9 @@ pub fn capture_active_window_to_library(
     kind: String,
     options: LibrarySaveOptions,
     _use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     #[cfg(target_os = "macos")]
     let image = capture_macos_selection(true)?;
     #[cfg(target_os = "linux")]
@@ -623,8 +630,9 @@ pub fn capture_interactive_region_to_library(
     kind: String,
     options: LibrarySaveOptions,
     _use_directx: bool,
+    minimize_window: bool,
 ) -> Result<ScreenshotCaptureResult, String> {
-    let _guard = MinimizedCaptureWindow::new(app)?;
+    let _guard = MinimizedCaptureWindow::new(app, minimize_window)?;
     #[cfg(target_os = "macos")]
     let image = capture_macos_selection(false)?;
     #[cfg(target_os = "linux")]
@@ -1898,9 +1906,11 @@ fn file_type_sort_key(path: &Path) -> String {
 }
 
 fn taken_at_from_file_name(file_name: &str) -> Option<u128> {
-    file_name
-        .split(['-', '.'])
-        .find_map(|part| (part.len() >= 10).then(|| part.parse::<u128>().ok()).flatten())
+    file_name.split(['-', '.']).find_map(|part| {
+        (part.len() >= 10)
+            .then(|| part.parse::<u128>().ok())
+            .flatten()
+    })
 }
 
 fn validate_batch_dimensions(width: u32, height: u32) -> Result<(), String> {
@@ -1934,9 +1944,7 @@ fn resolve_resize_dimensions(
             }
             (Some(width), Some(height)) => (width, height),
             (Some(width), None) => (width, scale_dimension(source_height, width, source_width)),
-            (None, Some(height)) => {
-                (scale_dimension(source_width, height, source_height), height)
-            }
+            (None, Some(height)) => (scale_dimension(source_width, height, source_height), height),
             (None, None) => {
                 return Err("enter a screenshot width, height, or both".to_string());
             }
@@ -1945,7 +1953,9 @@ fn resolve_resize_dimensions(
             let percentage = request
                 .percentage
                 .filter(|percentage| (1..=500).contains(percentage))
-                .ok_or_else(|| "screenshot resize percentage must be between 1 and 500".to_string())?;
+                .ok_or_else(|| {
+                    "screenshot resize percentage must be between 1 and 500".to_string()
+                })?;
             (
                 scale_dimension(source_width, u32::from(percentage), 100),
                 scale_dimension(source_height, u32::from(percentage), 100),
@@ -2064,7 +2074,9 @@ fn ensure_thumbnail_data_url(
 ) -> Result<String, String> {
     let thumbs_dir = folder.join(THUMBS_DIR_NAME);
     let thumb_path = thumbs_dir.join(format!("{file_name}.thumb.jpg"));
-    let source_modified = fs::metadata(path).ok().and_then(|meta| meta.modified().ok());
+    let source_modified = fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok());
     let thumb_fresh = match (fs::metadata(&thumb_path), source_modified) {
         (Ok(thumb_meta), Some(source_modified)) => thumb_meta
             .modified()
@@ -2096,17 +2108,13 @@ fn ensure_thumbnail_data_url(
         return Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(jpeg)));
     }
 
-    let bytes = fs::read(&thumb_path)
-        .map_err(|error| format!("failed to load thumbnail: {error}"))?;
+    let bytes =
+        fs::read(&thumb_path).map_err(|error| format!("failed to load thumbnail: {error}"))?;
     Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
 }
 
 fn remove_thumbnail_for(folder: &Path, id: &str) {
-    let _ = fs::remove_file(
-        folder
-            .join(THUMBS_DIR_NAME)
-            .join(format!("{id}.thumb.jpg")),
-    );
+    let _ = fs::remove_file(folder.join(THUMBS_DIR_NAME).join(format!("{id}.thumb.jpg")));
 }
 
 fn screenshot_path_from_id(folder: &Path, id: &str) -> Result<PathBuf, String> {
@@ -2222,8 +2230,8 @@ mod platform {
         },
         UI::{
             Controls::{
-                BPBF_COMPATIBLEBITMAP, BeginBufferedPaint, BufferedPaintInit,
-                BufferedPaintUnInit, EndBufferedPaint,
+                BPBF_COMPATIBLEBITMAP, BeginBufferedPaint, BufferedPaintInit, BufferedPaintUnInit,
+                EndBufferedPaint,
             },
             WindowsAndMessaging::{
                 CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW,
@@ -2231,9 +2239,9 @@ mod platform {
                 GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, IDC_CROSS, IsWindowVisible,
                 LoadCursorW, MSG, PostQuitMessage, RegisterClassW, SM_CXVIRTUALSCREEN,
                 SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_SHOW,
-                SetWindowLongPtrW, ShowWindow, TranslateMessage, WM_CREATE, WM_DESTROY,
-                WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
-                WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+                SetWindowLongPtrW, ShowWindow, TranslateMessage, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WNDCLASSW,
+                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
             },
         },
     };
@@ -2538,8 +2546,7 @@ mod platform {
     /// on-screen position. Best effort: any failure leaves the capture as-is.
     pub fn draw_cursor_on_dib(dib: &mut [u8], origin_x: i32, origin_y: i32) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CURSOR_SHOWING, CURSORINFO, DI_NORMAL, DrawIconEx, GetCursorInfo, GetIconInfo,
-            ICONINFO,
+            CURSOR_SHOWING, CURSORINFO, DI_NORMAL, DrawIconEx, GetCursorInfo, GetIconInfo, ICONINFO,
         };
 
         let header_size = mem::size_of::<BITMAPINFOHEADER>();
@@ -2680,8 +2687,8 @@ mod platform {
             CompressionType::Level(compression_level),
             FilterType::Adaptive,
         )
-            .write_image(&rgb, width, height, ColorType::Rgb8.into())
-            .map_err(|error| format!("failed to encode PNG: {error}"))?;
+        .write_image(&rgb, width, height, ColorType::Rgb8.into())
+        .map_err(|error| format!("failed to encode PNG: {error}"))?;
         Ok(png)
     }
 
@@ -3350,14 +3357,20 @@ mod tests {
             percentage: None,
             preserve_aspect_ratio: false,
         };
-        assert_eq!(resolve_resize_dimensions(&width_only, 1920, 1080), Ok((1024, 576)));
+        assert_eq!(
+            resolve_resize_dimensions(&width_only, 1920, 1080),
+            Ok((1024, 576))
+        );
 
         let height_only = ResizeScreenshotsRequest {
             width: None,
             height: Some(720),
             ..width_only
         };
-        assert_eq!(resolve_resize_dimensions(&height_only, 1920, 1080), Ok((1280, 720)));
+        assert_eq!(
+            resolve_resize_dimensions(&height_only, 1920, 1080),
+            Ok((1280, 720))
+        );
 
         let percentage = ResizeScreenshotsRequest {
             mode: "percentage".to_string(),
@@ -3366,8 +3379,14 @@ mod tests {
             percentage: Some(50),
             ..height_only
         };
-        assert_eq!(resolve_resize_dimensions(&percentage, 1920, 1080), Ok((960, 540)));
-        assert_eq!(resolve_resize_dimensions(&percentage, 800, 1200), Ok((400, 600)));
+        assert_eq!(
+            resolve_resize_dimensions(&percentage, 1920, 1080),
+            Ok((960, 540))
+        );
+        assert_eq!(
+            resolve_resize_dimensions(&percentage, 800, 1200),
+            Ok((400, 600))
+        );
     }
 
     #[test]
@@ -3375,9 +3394,14 @@ mod tests {
         let folder = tempfile::tempdir().expect("temp folder");
         let image = image::DynamicImage::new_rgba8(2, 2);
         for format in ["png", "jpeg", "webp", "gif"] {
-            let path = folder.path().join(format!("output.{}", output_extension(format)));
+            let path = folder
+                .path()
+                .join(format!("output.{}", output_extension(format)));
             write_dynamic_image(&image, &path, format, 80).expect("encode image");
-            assert_eq!(image::image_dimensions(path).expect("read dimensions"), (2, 2));
+            assert_eq!(
+                image::image_dimensions(path).expect("read dimensions"),
+                (2, 2)
+            );
         }
         assert_eq!(gif_speed_for_quality(1), 30);
         assert_eq!(gif_speed_for_quality(100), 1);
@@ -3409,7 +3433,10 @@ mod tests {
         // A thickness beyond half the image must not panic or over-run.
         let mut tiny = vec![0u8; 3 * 3 * 4];
         apply_border_pixels(&mut tiny, 3, 3, 64, "solid", [255, 255, 255, 255]);
-        assert!(tiny.chunks_exact(4).all(|pixel| pixel == [255, 255, 255, 255]));
+        assert!(
+            tiny.chunks_exact(4)
+                .all(|pixel| pixel == [255, 255, 255, 255])
+        );
 
         // A dotted border leaves gaps along the top edge.
         let mut dotted = vec![0u8; 16 * 4 * 4];
@@ -3434,12 +3461,7 @@ mod tests {
             let image = image::RgbaImage::new(width, height);
             let mut bytes = Vec::new();
             image::codecs::png::PngEncoder::new(&mut bytes)
-                .write_image(
-                    image.as_raw(),
-                    width,
-                    height,
-                    ColorType::Rgba8.into(),
-                )
+                .write_image(image.as_raw(), width, height, ColorType::Rgba8.into())
                 .expect("encode PNG data URL");
             format!("data:image/png;base64,{}", STANDARD.encode(bytes))
         }
@@ -3459,7 +3481,10 @@ mod tests {
         )
         .expect("save edited copy");
         assert_ne!(copy.id, "source.png");
-        assert_eq!(image::image_dimensions(&source).expect("source dimensions"), (2, 2));
+        assert_eq!(
+            image::image_dimensions(&source).expect("source dimensions"),
+            (2, 2)
+        );
         assert_eq!(
             image::image_dimensions(folder.path().join(&copy.id)).expect("copy dimensions"),
             (4, 3),
@@ -3475,7 +3500,10 @@ mod tests {
         )
         .expect("overwrite source");
         assert_eq!(saved.id, "source.png");
-        assert_eq!(image::image_dimensions(source).expect("saved dimensions"), (5, 2));
+        assert_eq!(
+            image::image_dimensions(source).expect("saved dimensions"),
+            (5, 2)
+        );
     }
 
     #[cfg(not(target_os = "windows"))]

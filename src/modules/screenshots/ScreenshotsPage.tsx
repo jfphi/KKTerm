@@ -402,7 +402,7 @@ export function ScreenshotsPage({ active }: { active: boolean }) {
   }
 
   function capture(mode: ScreenshotCaptureMode) {
-    void performScreenshotCapture(mode, t, captureDelay);
+    void performScreenshotCapture(mode, t, captureDelay, true);
   }
 
   function finishBatch(created: StoredScreenshot[]) {
