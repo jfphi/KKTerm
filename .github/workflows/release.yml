@@ -51,7 +51,11 @@ jobs:
   release:
     name: GitHub Release (Windows x64/ARM64)
     runs-on: windows-2025
-    timeout-minutes: 180
+    # Heaviest job in the chain: x64 installer + ARM64 cross-build (with on-runner
+    # toolchain provisioning) + both portable packages + lint/tests + installer and
+    # portable smoke tests. Kept well above the observed 3-4h so a nearly-finished
+    # build is never killed by the timeout, forcing a full restart.
+    timeout-minutes: 300
     outputs:
       tag: ${{ steps.release_info.outputs.tag }}
     env:
